@@ -6,6 +6,8 @@ namespace Bizkit\CircuitBreakerBundle\HttpClient;
 
 use Bizkit\CircuitBreakerBundle\FailureChecker\FailureCheckerInterface;
 use GabrielAnhaia\PhpCircuitBreaker\CircuitBreaker;
+use Psr\Log\LoggerAwareInterface;
+use Psr\Log\LoggerAwareTrait;
 use Symfony\Component\HttpClient\AsyncDecoratorTrait;
 use Symfony\Component\HttpClient\Exception\InvalidArgumentException;
 use Symfony\Component\HttpClient\MockHttpClient;
@@ -17,9 +19,10 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
 use Symfony\Contracts\Service\ResetInterface;
 
-final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterface
+final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterface, LoggerAwareInterface
 {
     use AsyncDecoratorTrait;
+    use LoggerAwareTrait;
 
     public function __construct(
         HttpClientInterface $client,
@@ -61,6 +64,11 @@ final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterf
         }
 
         if (!$this->circuitBreaker->canPass($serviceName)) {
+            $this->logger?->debug(
+                'Circuit breaker blocked HTTP request.',
+                self::createLogContext($method, $url, $serviceName),
+            );
+
             return self::createOpenCircuitResponse($method, $url, $options, $serviceName);
         }
 
@@ -71,13 +79,21 @@ final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterf
             $method,
             $url,
             $options,
-            function (ChunkInterface $chunk, AsyncContext $context) use (&$recorded, $failureChecker, $serviceName): \Generator {
+            function (ChunkInterface $chunk, AsyncContext $context) use (&$recorded, $failureChecker, $serviceName, $method, $url): \Generator {
                 if (!$recorded) {
                     if ($failureChecker($chunk, $context, $serviceName)) {
                         $this->circuitBreaker->recordFailure($serviceName);
+                        $this->logger?->debug(
+                            'Circuit breaker recorded HTTP request failure.',
+                            self::createLogContext($method, $url, $serviceName, $chunk, $context),
+                        );
                         $recorded = true;
                     } elseif ($chunk->isLast()) {
                         $this->circuitBreaker->recordSuccess($serviceName);
+                        $this->logger?->debug(
+                            'Circuit breaker recorded HTTP request success.',
+                            self::createLogContext($method, $url, $serviceName, $chunk, $context),
+                        );
                         $recorded = true;
                     }
                 }
@@ -102,5 +118,32 @@ final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterf
         );
 
         return new AsyncResponse(new MockHttpClient($response), $method, $url, $options);
+    }
+
+    /**
+     * @return array<string, int|string>
+     */
+    private static function createLogContext(
+        string $method,
+        string $url,
+        string $serviceName,
+        ?ChunkInterface $chunk = null,
+        ?AsyncContext $context = null,
+    ): array {
+        $logContext = [
+            'service_name' => $serviceName,
+            'method' => $method,
+            'url' => $url,
+        ];
+
+        if (null !== $context && 0 !== $statusCode = $context->getStatusCode()) {
+            $logContext['status_code'] = $statusCode;
+        }
+
+        if (null !== $chunk && null !== $error = $chunk->getError()) {
+            $logContext['error'] = $error;
+        }
+
+        return $logContext;
     }
 }

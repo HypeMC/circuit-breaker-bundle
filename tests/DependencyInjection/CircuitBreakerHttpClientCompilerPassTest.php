@@ -66,6 +66,10 @@ final class CircuitBreakerHttpClientCompilerPassTest extends TestCase
         self::assertSame('bizkit_circuit_breaker.failure_checker.default', (string) $decorator->getArgument(2));
         self::assertSame('http_client', $decorator->getArgument(3));
         self::assertSame(['http_client', null, 30], $decorator->getDecoratedService());
+        self::assertSame('setLogger', $decorator->getMethodCalls()[0][0]);
+        self::assertSame('logger', (string) $loggerArg = $decorator->getMethodCalls()[0][1][0]);
+        self::assertSame(ContainerInterface::IGNORE_ON_INVALID_REFERENCE, $loggerArg->getInvalidBehavior());
+        self::assertSame([['channel' => 'bizkit_circuit_breaker']], $decorator->getTag('monolog.logger'));
 
         self::assertCommandServiceLocatorContains($container, ['http_client']);
     }

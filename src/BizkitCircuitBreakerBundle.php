@@ -15,7 +15,8 @@ final class BizkitCircuitBreakerBundle extends AbstractBundle
 {
     public function build(ContainerBuilder $container): void
     {
-        $container->addCompilerPass(new CircuitBreakerHttpClientCompilerPass());
+        // Needs to run before Monolog's LoggerChannelPass.
+        $container->addCompilerPass(new CircuitBreakerHttpClientCompilerPass(), priority: 10);
     }
 
     public function configure(DefinitionConfigurator $definition): void

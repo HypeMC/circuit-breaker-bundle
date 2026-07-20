@@ -15,6 +15,8 @@ use GabrielAnhaia\PhpCircuitBreaker\Storage\InMemoryStorage;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\AbstractLogger;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpClient\Exception\InvalidArgumentException;
 use Symfony\Component\HttpClient\Exception\ServerException;
 use Symfony\Component\HttpClient\Exception\TransportException;
@@ -265,6 +267,124 @@ final class CircuitBreakerHttpClientTest extends TestCase
         }
     }
 
+    public function testLogsRecordedSuccess(): void
+    {
+        $records = [];
+        $storage = new InMemoryStorage();
+        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $client = new CircuitBreakerHttpClient(
+            new MockHttpClient(new MockResponse('ok', ['http_code' => 200])),
+            $circuitBreaker,
+            new DefaultFailureChecker(),
+            'api',
+        );
+        $client->setLogger(self::createLogger($records));
+
+        self::assertSame('ok', $client->request('GET', 'https://example.com')->getContent(false));
+
+        self::assertSame([
+            [
+                'level' => 'debug',
+                'message' => 'Circuit breaker recorded HTTP request success.',
+                'context' => [
+                    'service_name' => 'api',
+                    'method' => 'GET',
+                    'url' => 'https://example.com',
+                    'status_code' => 200,
+                ],
+            ],
+        ], $records);
+    }
+
+    public function testLogsRecordedFailure(): void
+    {
+        $records = [];
+        $storage = new InMemoryStorage();
+        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $client = new CircuitBreakerHttpClient(
+            new MockHttpClient(new MockResponse('', ['http_code' => 500])),
+            $circuitBreaker,
+            new DefaultFailureChecker(),
+            'api',
+        );
+        $client->setLogger(self::createLogger($records));
+
+        self::assertSame(500, $client->request('GET', 'https://example.com')->getStatusCode());
+
+        self::assertSame([
+            [
+                'level' => 'debug',
+                'message' => 'Circuit breaker recorded HTTP request failure.',
+                'context' => [
+                    'service_name' => 'api',
+                    'method' => 'GET',
+                    'url' => 'https://example.com',
+                    'status_code' => 500,
+                ],
+            ],
+        ], $records);
+    }
+
+    public function testLogsRecordedTransportFailure(): void
+    {
+        $records = [];
+        $storage = new InMemoryStorage();
+        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $client = new CircuitBreakerHttpClient(
+            new MockHttpClient(new MockResponse([new TransportException('Network failure')])),
+            $circuitBreaker,
+            new DefaultFailureChecker(),
+            'api',
+        );
+        $client->setLogger(self::createLogger($records));
+
+        $this->expectException(TransportException::class);
+
+        try {
+            $client->request('GET', 'https://example.com')->getContent();
+        } finally {
+            self::assertSame([
+                [
+                    'level' => 'debug',
+                    'message' => 'Circuit breaker recorded HTTP request failure.',
+                    'context' => [
+                        'service_name' => 'api',
+                        'method' => 'GET',
+                        'url' => 'https://example.com',
+                        'status_code' => 200,
+                        'error' => 'Network failure',
+                    ],
+                ],
+            ], $records);
+        }
+    }
+
+    public function testLogsBlockedRequestWhenCircuitIsOpen(): void
+    {
+        $records = [];
+        $storage = new InMemoryStorage();
+        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(exceptionsEnabled: false));
+        $circuitBreaker->forceState('api', CircuitState::OPEN);
+        $innerClient = new MockHttpClient();
+
+        $client = new CircuitBreakerHttpClient($innerClient, $circuitBreaker, new DefaultFailureChecker(), 'api');
+        $client->setLogger(self::createLogger($records));
+
+        self::assertSame(503, $client->request('GET', 'https://example.com')->getStatusCode());
+
+        self::assertSame([
+            [
+                'level' => 'debug',
+                'message' => 'Circuit breaker blocked HTTP request.',
+                'context' => [
+                    'service_name' => 'api',
+                    'method' => 'GET',
+                    'url' => 'https://example.com',
+                ],
+            ],
+        ], $records);
+    }
+
     /**
      * @param array<string, mixed> $options
      */
@@ -381,5 +501,33 @@ final class CircuitBreakerHttpClientTest extends TestCase
         $this->expectExceptionMessage('Option "extra.circuit_breaker.service_name" must be a non-empty string.');
 
         $client->request('GET', 'https://example.com', $options);
+    }
+
+    /**
+     * @param list<array{level: mixed, message: string, context: array<string, mixed>}> $records
+     */
+    private static function createLogger(array &$records): LoggerInterface
+    {
+        return new class($records) extends AbstractLogger {
+            /**
+             * @param list<array{level: mixed, message: string, context: array<string, mixed>}> $records
+             */
+            public function __construct(
+                private array &$records,
+            ) {
+            }
+
+            /**
+             * @param array<string, mixed> $context
+             */
+            public function log($level, \Stringable|string $message, array $context = []): void
+            {
+                $this->records[] = [
+                    'level' => $level,
+                    'message' => (string) $message,
+                    'context' => $context,
+                ];
+            }
+        };
     }
 }

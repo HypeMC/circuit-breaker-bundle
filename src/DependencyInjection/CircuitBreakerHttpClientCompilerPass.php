@@ -147,6 +147,8 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
                 new Reference($failureCheckerId),
                 $clientId,
             ])
+            ->addMethodCall('setLogger', [new Reference('logger', ContainerInterface::IGNORE_ON_INVALID_REFERENCE)])
+            ->addTag('monolog.logger', ['channel' => 'bizkit_circuit_breaker'])
             ->addTag('kernel.reset', ['method' => 'reset', 'on_invalid' => 'ignore']);
 
         return $circuitBreakerId;

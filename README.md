@@ -48,6 +48,9 @@ stateDiagram-v2
 - **Symfony Event Dispatcher integration**: Dispatches php-circuit-breaker events through Symfony's event dispatcher
   when `symfony/event-dispatcher` is installed.
 
+- **Debug logging**: Logs blocked requests and recorded outcomes to the `bizkit_circuit_breaker` logger channel when a
+  `logger` service is available.
+
 - **Console commands**: Optional commands are available when `symfony/console` is installed to inspect, force, and clear
   circuit breaker state.
 
@@ -250,6 +253,21 @@ $response = $client->request('GET', 'https://example.com/api', [
         ],
     ],
 ]);
+```
+
+### Logging
+
+When a `logger` service is available, decorated clients write debug messages to the `bizkit_circuit_breaker` logger
+channel. With MonologBundle, filter that channel like any other Symfony logger channel:
+
+```yaml
+monolog:
+    handlers:
+        circuit_breaker:
+            type: stream
+            path: '%kernel.logs_dir%/circuit_breaker.log'
+            level: debug
+            channels: [ 'bizkit_circuit_breaker' ]
 ```
 
 ### Console Commands
