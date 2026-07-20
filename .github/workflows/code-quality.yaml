@@ -18,7 +18,7 @@ env:
 jobs:
     composer:
         runs-on: ubuntu-latest
-        name: Composer Validations
+        name: Composer Validation
         steps:
             -   name: Checkout
                 uses: actions/checkout@v7
@@ -67,7 +67,7 @@ jobs:
                     tools: phpstan
 
             -   name: Install Dependencies
-                uses: ramsey/composer-install@v3
+                uses: ramsey/composer-install@v4
                 with:
                     composer-options: '--prefer-dist'
 
