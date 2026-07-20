@@ -1,0 +1,19 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Call to function is_array\(\) with array\{\}\|array\{service_name\?\: non\-empty\-string\|null, failure_checker\?\: callable\(Symfony\\Contracts\\HttpClient\\ChunkInterface, Symfony\\Component\\HttpClient\\Response\\AsyncContext, string\)\: bool\} will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/HttpClient/CircuitBreakerHttpClient.php
+
+		-
+			message: '#^Call to function is_callable\(\) with callable\(Symfony\\Contracts\\HttpClient\\ChunkInterface, Symfony\\Component\\HttpClient\\Response\\AsyncContext, string\)\: bool will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/HttpClient/CircuitBreakerHttpClient.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/HttpClient/CircuitBreakerHttpClient.php
