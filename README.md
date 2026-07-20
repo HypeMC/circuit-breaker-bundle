@@ -45,6 +45,11 @@ stateDiagram-v2
 
 - **PSR-6 cache storage**: Uses a configured cache pool service as the storage backend for circuit breaker state.
 
+- **Custom failure rules**: Decide which responses or transport errors should count as circuit breaker failures.
+
+- **Service name resolution**: Use the configured client service name, resolve the name from the request host, or
+  override it for a single request.
+
 - **Symfony Event Dispatcher integration**: Dispatches php-circuit-breaker events through Symfony's event dispatcher
   when `symfony/event-dispatcher` is installed.
 
@@ -84,37 +89,46 @@ bizkit_circuit_breaker:
     # Circuit breaker configuration for the main Symfony HttpClient service.
     http_client:
         # Service ID of the PSR-6 cache pool used to store circuit breaker state.
-        storage:              cache.circuit_breaker
-        failure_threshold:    5
-        success_threshold:    1
-        time_window:          20
-        open_timeout:         30
-        half_open_timeout:    20
-        exceptions_enabled:   false
+        storage:               cache.circuit_breaker
+        failure_threshold:     5
+        success_threshold:     1
+        time_window:           20
+        open_timeout:          30
+        half_open_timeout:     20
+        exceptions_enabled:    false
 
         # Service ID of the failure checker used to decide when a response
         # should count as a circuit breaker failure.
-        failure_checker:      bizkit_circuit_breaker.failure_checker.default
+        failure_checker:       bizkit_circuit_breaker.failure_checker.default
+
+        # Optional service ID used to resolve the circuit breaker service name
+        # from each request. Omit it to use the HTTP client service ID.
+        service_name_resolver: null
 
     # Circuit breaker configuration for scoped Symfony HttpClient services.
     scoped_http_clients:
         api.client:
             # Service ID of the PSR-6 cache pool used to store circuit breaker state.
-            storage:              cache.circuit_breaker
-            failure_threshold:    3
-            success_threshold:    1
-            time_window:          20
-            open_timeout:         60
-            half_open_timeout:    20
-            exceptions_enabled:   false
+            storage:               cache.circuit_breaker
+            failure_threshold:     3
+            success_threshold:     1
+            time_window:           20
+            open_timeout:          60
+            half_open_timeout:     20
+            exceptions_enabled:    false
 
             # Service ID of the failure checker used to decide when a response
             # should count as a circuit breaker failure.
-            failure_checker:      bizkit_circuit_breaker.failure_checker.default
+            failure_checker:       bizkit_circuit_breaker.failure_checker.default
+
+            # Optional service ID used to resolve the circuit breaker service name
+            # from each request. Omit it to use the scoped client service ID.
+            service_name_resolver: null
 ```
 
 The `storage` value must be the service ID of a PSR-6 cache pool. A client without a configured `storage` value is not
-decorated. Omit `failure_checker` to use the default transport-error and `5xx` failure behavior.
+decorated. Omit `failure_checker` to use the default transport-error and `5xx` failure behavior. Omit
+`service_name_resolver` to use the HTTP client service ID as the circuit breaker service name.
 
 You can use an existing pool, or define a dedicated Symfony cache pool:
 
@@ -148,22 +162,10 @@ final class ApiClient
     public function fetch(): string
     {
         return $this->client
-            ->request('GET', 'https://example.com/api')
+            ->request('GET', 'https://api.example.com/')
             ->getContent();
     }
 }
-```
-
-Override the circuit breaker service name for a single request with Symfony's `extra` option:
-
-```php
-$response = $client->request('GET', 'https://example.com/api', [
-    'extra' => [
-        'circuit_breaker' => [
-            'service_name' => 'payments.stripe',
-        ],
-    ],
-]);
 ```
 
 By default, successful responses record successes when the response body completes. Server errors (`5xx`) and transport
@@ -171,7 +173,17 @@ errors record failures. If your API uses different status codes or response meta
 [Custom Failure Rules](#custom-failure-rules).
 
 When the circuit is open and `exceptions_enabled` is `false`, the decorated client returns a synthetic `503` response.
-When `exceptions_enabled` is `true`, the underlying circuit breaker throws its open-circuit exception.
+When `exceptions_enabled` is `true`, `gabrielanhaia/php-circuit-breaker` throws `OpenCircuitException`:
+
+```php
+use GabrielAnhaia\PhpCircuitBreaker\Exception\OpenCircuitException;
+
+try {
+    $response = $client->request('GET', 'https://api.example.com/');
+} catch (OpenCircuitException $exception) {
+    // Handle an open circuit for the configured service name.
+}
+```
 
 ### Scoped HTTP Clients
 
@@ -182,7 +194,7 @@ framework:
     http_client:
         scoped_clients:
             api.client:
-                base_uri: 'https://example.com/api/'
+                base_uri: 'https://api.example.com/'
 
 bizkit_circuit_breaker:
     scoped_http_clients:
@@ -194,49 +206,103 @@ bizkit_circuit_breaker:
 Scoped clients do not inherit settings from `http_client`. Each configured scoped client uses its own defaults unless
 values are provided explicitly.
 
-### Custom Failure Rules
+### Service Names
 
-The default failure rules treat transport errors and `5xx` responses as failures. To change that behavior, implement
-`FailureCheckerInterface` and configure the service ID under `failure_checker`:
+The circuit breaker stores state by service name. Without extra configuration, the service name is the decorated HTTP
+client service ID, such as `http_client` or a scoped client ID like `api.client`.
 
-```php
-namespace App\Http;
+Custom service names are scoped under the configured HTTP client service ID. For example, a `payments-api` override on
+`http_client` is stored as `http_client:payments-api`. This keeps two HTTP clients that share the same cache pool from
+accidentally sharing circuit breaker state.
 
-use Bizkit\CircuitBreakerBundle\FailureChecker\FailureCheckerInterface;
-use Symfony\Component\HttpClient\Response\AsyncContext;
-use Symfony\Contracts\HttpClient\ChunkInterface;
-
-final class ApiFailureChecker implements FailureCheckerInterface
-{
-    public function __invoke(
-        ChunkInterface $chunk,
-        AsyncContext $context,
-        string $serviceName,
-    ): bool {
-        if (null !== $chunk->getError()) {
-            return true;
-        }
-
-        return $chunk->isFirst() && $context->getStatusCode() >= 400;
-    }
-}
-```
-
-Reference it from the main client or any scoped client configuration:
+Use the built-in host resolver when one HTTP client calls multiple hosts and each host should have independent circuit
+breaker state. Relative URLs keep using the configured client service name:
 
 ```yaml
 bizkit_circuit_breaker:
     http_client:
-        failure_checker: App\Http\ApiFailureChecker
+        storage: cache.circuit_breaker
+        service_name_resolver: bizkit_circuit_breaker.service_name_resolver.host
 ```
 
-Override the failure checker for a single request with `extra.circuit_breaker.failure_checker`:
+Override the circuit breaker service name for a single request with Symfony's `extra` option:
+
+```php
+$response = $client->request('GET', 'https://api.example.com/', [
+    'extra' => [
+        'circuit_breaker' => [
+            'service_name' => 'payments-api',
+        ],
+    ],
+]);
+```
+
+The request override may also be a callable when the service name depends on the request. This is useful when one host
+serves different upstream dependencies and they should not share circuit breaker state. Return `null` to keep using the
+configured resolver or default service name:
+
+```php
+$response = $client->request('GET', 'https://api.example.com/payments/charges', [
+    'extra' => [
+        'circuit_breaker' => [
+            'service_name' => static function (
+                string $method,
+                string $url,
+                array $options,
+            ): ?string {
+                if (!is_string($path = parse_url($url, PHP_URL_PATH))) {
+                    return null;
+                }
+
+                return str_starts_with($path, '/payments/') ? 'payments-api' : null;
+            },
+        ],
+    ],
+]);
+```
+
+Custom resolver services should implement `ServiceNameResolverInterface` and return a non-empty string, or `null` to
+fall back to the configured client service name. For example, this resolver groups requests by a fingerprint of the
+`X-Api-Key` request header:
+
+```php
+namespace App\CircuitBreaker;
+
+use Bizkit\CircuitBreakerBundle\ServiceNameResolver\ServiceNameResolverInterface;
+
+final class ApiKeyServiceNameResolver implements ServiceNameResolverInterface
+{
+    /** @param array<string, mixed> $options */
+    public function resolve(string $method, string $url, array $options): ?string
+    {
+        $apiKey = $options['headers']['X-Api-Key'] ?? null;
+
+        return null !== $apiKey && '' !== $apiKey
+            ? 'api-key-'.substr(hash('sha256', $apiKey), 0, 12)
+            : null;
+    }
+}
+```
+
+Configure it on the main client or any scoped client:
+
+```yaml
+bizkit_circuit_breaker:
+    http_client:
+        storage: cache.circuit_breaker
+        service_name_resolver: App\CircuitBreaker\ApiKeyServiceNameResolver
+```
+
+### Custom Failure Rules
+
+The default failure rules treat transport errors and `5xx` responses as failures. Override the failure checker for a
+single request with `extra.circuit_breaker.failure_checker`:
 
 ```php
 use Symfony\Component\HttpClient\Response\AsyncContext;
 use Symfony\Contracts\HttpClient\ChunkInterface;
 
-$response = $client->request('GET', 'https://example.com/api', [
+$response = $client->request('GET', 'https://api.example.com/', [
     'extra' => [
         'circuit_breaker' => [
             'failure_checker' => static function (
@@ -253,6 +319,45 @@ $response = $client->request('GET', 'https://example.com/api', [
         ],
     ],
 ]);
+```
+
+Reusable failure checker services should implement `FailureCheckerInterface`. For example, this checker only records
+failures when the HTTP connection was not established. It ignores HTTP response status codes and body errors from a
+service that did respond:
+
+```php
+namespace App\CircuitBreaker;
+
+use Bizkit\CircuitBreakerBundle\FailureChecker\FailureCheckerInterface;
+use Symfony\Component\HttpClient\Response\AsyncContext;
+use Symfony\Contracts\HttpClient\ChunkInterface;
+
+final class ConnectionErrorFailureChecker implements FailureCheckerInterface
+{
+    public function __invoke(
+        ChunkInterface $chunk,
+        AsyncContext $context,
+        string $serviceName,
+    ): bool {
+        if (null === $chunk->getError()) {
+            return false;
+        }
+
+        $connectTime = $context->getInfo('connect_time');
+
+        return 0 === $context->getStatusCode()
+            && (null === $connectTime || 0.0 === $connectTime);
+    }
+}
+```
+
+Configure it on the main client or any scoped client:
+
+```yaml
+bizkit_circuit_breaker:
+    http_client:
+        storage: cache.circuit_breaker
+        failure_checker: App\CircuitBreaker\ConnectionErrorFailureChecker
 ```
 
 ### Logging
@@ -280,8 +385,18 @@ php bin/console bizkit:circuit-breaker:force http_client open --ttl=60
 php bin/console bizkit:circuit-breaker:clear http_client
 ```
 
-Use the configured service name as the command argument. For the main client, use `http_client`. For scoped clients, use
-the scoped client service ID.
+The first argument is the configured HTTP client service ID. For the main client, use `http_client`. For scoped clients,
+use the scoped client service ID.
+
+When the circuit service name differs from the HTTP client service ID, pass the custom or resolved part as the optional
+`service` argument. The command applies the HTTP client prefix internally, so `http_client api.example.com` targets the
+same circuit breaker state that the host resolver stores as `http_client:api.example.com`:
+
+```sh
+php bin/console bizkit:circuit-breaker:status http_client api.example.com
+php bin/console bizkit:circuit-breaker:force http_client open api.example.com --ttl=60
+php bin/console bizkit:circuit-breaker:clear http_client api.example.com
+```
 
 ## Versioning
 

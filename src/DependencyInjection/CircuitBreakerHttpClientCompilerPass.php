@@ -28,14 +28,15 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
 
         /**
          * @var array{
-         *     storage: string|null,
+         *     storage: ?string,
          *     failure_threshold: int,
          *     success_threshold: int,
          *     time_window: int,
          *     open_timeout: int,
          *     half_open_timeout: int,
          *     exceptions_enabled: bool,
-         *     failure_checker: string|null,
+         *     failure_checker: ?string,
+         *     service_name_resolver: ?string,
          * }|array{} $httpClientConfig
          */
         $httpClientConfig = $container->getParameter('.bizkit_circuit_breaker.http_client');
@@ -51,14 +52,15 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
 
         /**
          * @var array<string, array{
-         *     storage: string|null,
+         *     storage: ?string,
          *     failure_threshold: int,
          *     success_threshold: int,
          *     time_window: int,
          *     open_timeout: int,
          *     half_open_timeout: int,
          *     exceptions_enabled: bool,
-         *     failure_checker: string|null,
+         *     failure_checker: ?string,
+         *     service_name_resolver: ?string,
          * }> $scopedClients
          */
         $scopedClients = $container->getParameter('.bizkit_circuit_breaker.scoped_http_clients');
@@ -87,7 +89,8 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
      *     open_timeout: int,
      *     half_open_timeout: int,
      *     exceptions_enabled: bool,
-     *     failure_checker: string|null,
+     *     failure_checker: ?string,
+     *     service_name_resolver: ?string,
      * } $config
      */
     private static function decorateClient(ContainerBuilder $container, string $clientId, array $config): string
@@ -139,14 +142,28 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
                 new Reference('bizkit_circuit_breaker.event_dispatcher', ContainerInterface::IGNORE_ON_INVALID_REFERENCE),
             ]);
 
+        $decoratorArguments = [
+            new Reference('.inner'),
+            new Reference($circuitBreakerId),
+            new Reference($failureCheckerId),
+            $clientId,
+        ];
+
+        if (null !== $serviceNameResolverId = $config['service_name_resolver'] ?? null) {
+            if (!$container->has($serviceNameResolverId)) {
+                throw new InvalidArgumentException(\sprintf(
+                    'Cannot enable circuit breaker for HTTP client "%s" because the configured service name resolver service "%s" does not exist.',
+                    $clientId,
+                    $serviceNameResolverId,
+                ));
+            }
+
+            $decoratorArguments[] = new Reference($serviceNameResolverId);
+        }
+
         $container->register($idPrefix.'.decorator', CircuitBreakerHttpClient::class)
             ->setDecoratedService($clientId, null, self::DECORATION_PRIORITY)
-            ->setArguments([
-                new Reference('.inner'),
-                new Reference($circuitBreakerId),
-                new Reference($failureCheckerId),
-                $clientId,
-            ])
+            ->setArguments($decoratorArguments)
             ->addMethodCall('setLogger', [new Reference('logger', ContainerInterface::IGNORE_ON_INVALID_REFERENCE)])
             ->addTag('monolog.logger', ['channel' => 'bizkit_circuit_breaker'])
             ->addTag('kernel.reset', ['method' => 'reset', 'on_invalid' => 'ignore']);

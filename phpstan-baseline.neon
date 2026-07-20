@@ -1,19 +1,39 @@
 parameters:
 	ignoreErrors:
 		-
-			message: '#^Call to function is_array\(\) with array\{\}\|array\{service_name\?\: non\-empty\-string\|null, failure_checker\?\: callable\(Symfony\\Contracts\\HttpClient\\ChunkInterface, Symfony\\Component\\HttpClient\\Response\\AsyncContext, string\)\: bool\} will always evaluate to true\.$#'
+			message: '#^Call to function is_callable\(\) with callable\(string, string, array\<string, mixed\>\)\: \(non\-empty\-string\|null\) will always evaluate to true\.$#'
 			identifier: function.alreadyNarrowedType
 			count: 1
 			path: src/HttpClient/CircuitBreakerHttpClient.php
 
 		-
-			message: '#^Call to function is_callable\(\) with callable\(Symfony\\Contracts\\HttpClient\\ChunkInterface, Symfony\\Component\\HttpClient\\Response\\AsyncContext, string\)\: bool will always evaluate to true\.$#'
+			message: '#^Call to function is_string\(\) with \(callable\(string, string, array\<string, mixed\>\)\: \(non\-empty\-string\|null\)&string\)\|non\-empty\-string will always evaluate to true\.$#'
 			identifier: function.alreadyNarrowedType
 			count: 1
 			path: src/HttpClient/CircuitBreakerHttpClient.php
 
 		-
-			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
-			identifier: function.alreadyNarrowedType
+			message: '#^Negated boolean expression is always false\.$#'
+			identifier: booleanNot.alwaysFalse
+			count: 2
+			path: src/HttpClient/CircuitBreakerHttpClient.php
+
+		-
+			message: '#^Result of \|\| is always false\.$#'
+			identifier: booleanOr.alwaysFalse
 			count: 1
 			path: src/HttpClient/CircuitBreakerHttpClient.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between '''' and \(callable\(string, string, array\<string, mixed\>\)\: \(non\-empty\-string\|null\)&string\)\|non\-empty\-string will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: src/HttpClient/CircuitBreakerHttpClient.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between '''' and non\-empty\-string will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: src/HttpClient/CircuitBreakerHttpClient.php
+
+

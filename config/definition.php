@@ -53,6 +53,10 @@ return static function (DefinitionConfigurator $definition): void {
                         'Service ID of the failure checker used to decide when a response should count as a circuit breaker failure.',
                         'bizkit_circuit_breaker.failure_checker.default',
                     ))
+                    ->append($stringOrNullNode(
+                        'service_name_resolver',
+                        'Service ID of the resolver used to determine the circuit breaker service name for each request.',
+                    ))
                 ->end()
             ->end()
             ->arrayNode('scoped_http_clients')
@@ -71,6 +75,10 @@ return static function (DefinitionConfigurator $definition): void {
                             'failure_checker',
                             'Service ID of the failure checker used to decide when a response should count as a circuit breaker failure.',
                             'bizkit_circuit_breaker.failure_checker.default',
+                        ))
+                        ->append($stringOrNullNode(
+                            'service_name_resolver',
+                            'Service ID of the resolver used to determine the circuit breaker service name for each request.',
                         ))
                     ->end()
                 ->end()

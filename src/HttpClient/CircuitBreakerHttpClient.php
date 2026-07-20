@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bizkit\CircuitBreakerBundle\HttpClient;
 
 use Bizkit\CircuitBreakerBundle\FailureChecker\FailureCheckerInterface;
+use Bizkit\CircuitBreakerBundle\ServiceNameResolver\ServiceNameResolverInterface;
 use GabrielAnhaia\PhpCircuitBreaker\CircuitBreaker;
 use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerAwareTrait;
@@ -28,7 +29,8 @@ final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterf
         HttpClientInterface $client,
         private readonly CircuitBreaker $circuitBreaker,
         private readonly FailureCheckerInterface $failureChecker,
-        private readonly string $serviceName,
+        private readonly string $defaultServiceName,
+        private readonly ?ServiceNameResolverInterface $serviceNameResolver = null,
     ) {
         $this->client = $client;
     }
@@ -37,8 +39,8 @@ final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterf
      * @param array{
      *     extra?: array{
      *         circuit_breaker?: array{
-     *             service_name?: ?non-empty-string,
-     *             failure_checker?: callable(ChunkInterface $chunk, AsyncContext $context, string $serviceName): bool,
+     *             service_name?: non-empty-string|callable(string $method, string $url, array<string, mixed> $options): ?non-empty-string|null,
+     *             failure_checker?: callable(ChunkInterface $chunk, AsyncContext $context, string $serviceName): bool|null,
      *         },
      *         ...
      *     },
@@ -47,21 +49,15 @@ final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterf
      */
     public function request(string $method, string $url, array $options = []): ResponseInterface
     {
-        $circuitBreakerOptions = $options['extra']['circuit_breaker'] ?? [];
-
-        if (!\is_array($circuitBreakerOptions)) {
+        if (!\is_array($circuitBreakerOptions = $options['extra']['circuit_breaker'] ?? [])) {
             throw new InvalidArgumentException('Option "extra.circuit_breaker" must be an array.');
         }
 
-        $serviceName = $circuitBreakerOptions['service_name'] ?? $this->serviceName;
-        if (!\is_string($serviceName) || '' === $serviceName) {
-            throw new InvalidArgumentException('Option "extra.circuit_breaker.service_name" must be a non-empty string.');
-        }
-
-        $failureChecker = $circuitBreakerOptions['failure_checker'] ?? $this->failureChecker;
-        if (!\is_callable($failureChecker)) {
+        if (!\is_callable($failureChecker = $circuitBreakerOptions['failure_checker'] ?? $this->failureChecker)) {
             throw new InvalidArgumentException('Option "extra.circuit_breaker.failure_checker" must be callable.');
         }
+
+        $serviceName = $this->resolveServiceName($method, $url, $options, $circuitBreakerOptions);
 
         if (!$this->circuitBreaker->canPass($serviceName)) {
             $this->logger?->debug(
@@ -101,6 +97,40 @@ final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterf
                 yield $chunk;
             },
         );
+    }
+
+    /**
+     * @param array<string, mixed> $options
+     * @param array{
+     *     service_name?: non-empty-string|callable(string $method, string $url, array<string, mixed> $options): ?non-empty-string|null,
+     *     failure_checker?: callable(ChunkInterface $chunk, AsyncContext $context, string $serviceName): bool|null,
+     * } $circuitBreakerOptions
+     */
+    private function resolveServiceName(string $method, string $url, array $options, array $circuitBreakerOptions): string
+    {
+        $serviceName = $circuitBreakerOptions['service_name'] ?? null;
+
+        if (null !== $serviceName && !\is_string($serviceName) && \is_callable($serviceName)) {
+            $serviceName = $serviceName($method, $url, $options);
+        }
+
+        if (null !== $serviceName) {
+            if (!\is_string($serviceName) || '' === $serviceName) {
+                throw new InvalidArgumentException('Option "extra.circuit_breaker.service_name" must be a non-empty string, or a callable returning null or a non-empty string.');
+            }
+
+            return $this->defaultServiceName.':'.$serviceName;
+        }
+
+        if (null === $serviceName = $this->serviceNameResolver?->resolve($method, $url, $options)) {
+            return $this->defaultServiceName;
+        }
+
+        if ('' === $serviceName) {
+            throw new InvalidArgumentException('The configured circuit breaker service name resolver must return null or a non-empty string.');
+        }
+
+        return $this->defaultServiceName.':'.$serviceName;
     }
 
     /**

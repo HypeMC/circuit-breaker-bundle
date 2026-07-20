@@ -7,6 +7,8 @@ namespace Bizkit\CircuitBreakerBundle\Tests\HttpClient;
 use Bizkit\CircuitBreakerBundle\FailureChecker\DefaultFailureChecker;
 use Bizkit\CircuitBreakerBundle\FailureChecker\FailureCheckerInterface;
 use Bizkit\CircuitBreakerBundle\HttpClient\CircuitBreakerHttpClient;
+use Bizkit\CircuitBreakerBundle\ServiceNameResolver\HostServiceNameResolver;
+use Bizkit\CircuitBreakerBundle\ServiceNameResolver\ServiceNameResolverInterface;
 use GabrielAnhaia\PhpCircuitBreaker\CircuitBreaker;
 use GabrielAnhaia\PhpCircuitBreaker\CircuitBreakerConfig;
 use GabrielAnhaia\PhpCircuitBreaker\CircuitState;
@@ -32,7 +34,8 @@ final class CircuitBreakerHttpClientTest extends TestCase
      * @param array<string, mixed> $options
      */
     #[TestWith([[], 'api'], 'default service name')]
-    #[TestWith([['extra' => ['circuit_breaker' => ['service_name' => 'payments']]], 'payments'], 'overridden service name')]
+    #[TestWith([['extra' => ['circuit_breaker' => ['service_name' => 'payments']]], 'api:payments'], 'overridden service name')]
+    #[TestWith([['extra' => ['circuit_breaker' => ['service_name' => 'strlen']]], 'api:strlen'], 'callable string service name')]
     public function testRecordsSuccessForSuccessfulResponseAfterBodyCompletes(array $options, string $serviceName): void
     {
         $storage = new InMemoryStorage();
@@ -77,7 +80,7 @@ final class CircuitBreakerHttpClientTest extends TestCase
      * @param array<string, mixed> $options
      */
     #[TestWith([[], 'api'], 'default service name')]
-    #[TestWith([['extra' => ['circuit_breaker' => ['service_name' => 'payments']]], 'payments'], 'overridden service name')]
+    #[TestWith([['extra' => ['circuit_breaker' => ['service_name' => 'payments']]], 'api:payments'], 'overridden service name')]
     public function testRecordsFailureForServerErrorResponse(array $options, string $serviceName): void
     {
         $storage = new InMemoryStorage();
@@ -190,7 +193,7 @@ final class CircuitBreakerHttpClientTest extends TestCase
             'extra' => [
                 'circuit_breaker' => [
                     'service_name' => 'payments',
-                    'failure_checker' => static fn (ChunkInterface $chunk, AsyncContext $context, string $serviceName): bool => 'payments' === $serviceName
+                    'failure_checker' => static fn (ChunkInterface $chunk, AsyncContext $context, string $serviceName): bool => 'api:payments' === $serviceName
                         && $chunk->isFirst()
                         && 404 === $context->getStatusCode(),
                 ],
@@ -199,7 +202,101 @@ final class CircuitBreakerHttpClientTest extends TestCase
 
         self::assertSame(404, $response->getStatusCode());
         self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState('api'));
-        self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('payments'));
+        self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('api:payments'));
+    }
+
+    public function testInjectedServiceNameResolverCanResolveServiceName(): void
+    {
+        $storage = new InMemoryStorage();
+        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $client = new CircuitBreakerHttpClient(
+            new MockHttpClient(new MockResponse('', ['http_code' => 500])),
+            $circuitBreaker,
+            new DefaultFailureChecker(),
+            'api',
+            new HostServiceNameResolver(),
+        );
+
+        self::assertSame(500, $client->request('GET', 'https://example.com/path')->getStatusCode());
+        self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState('api'));
+        self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('api:example.com'));
+    }
+
+    public function testServiceNameResolverCanFallBackToDefaultServiceName(): void
+    {
+        $storage = new InMemoryStorage();
+        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $client = new CircuitBreakerHttpClient(
+            new MockHttpClient(new MockResponse('', ['http_code' => 500])),
+            $circuitBreaker,
+            new DefaultFailureChecker(),
+            'api',
+            new HostServiceNameResolver(),
+        );
+
+        self::assertSame(500, $client->request('GET', '/path')->getStatusCode());
+        self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('api'));
+    }
+
+    public function testRequestServiceNameCallableOverrideWinsOverInjectedResolver(): void
+    {
+        $storage = new InMemoryStorage();
+        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $client = new CircuitBreakerHttpClient(
+            new MockHttpClient(new MockResponse('', ['http_code' => 500])),
+            $circuitBreaker,
+            new DefaultFailureChecker(),
+            'api',
+            new HostServiceNameResolver(),
+        );
+
+        /** @var list<array{0: string, 1: string, 2: array<string, mixed>}> $calls */
+        $calls = [];
+        /** @var array<string, mixed> $options */
+        $options = [
+            'extra' => [
+                'circuit_breaker' => [
+                    'service_name' => static function (string $method, string $url, array $options) use (&$calls): string {
+                        $calls[] = [$method, $url, $options];
+
+                        return 'payments';
+                    },
+                ],
+            ],
+        ];
+
+        $response = $client->request('GET', 'https://example.com/path', $options);
+
+        self::assertSame(500, $response->getStatusCode());
+        self::assertSame([['GET', 'https://example.com/path', $options]], $calls);
+        self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState('api'));
+        self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState('api:example.com'));
+        self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('api:payments'));
+    }
+
+    public function testRequestServiceNameCallableCanFallBackToInjectedResolver(): void
+    {
+        $storage = new InMemoryStorage();
+        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $client = new CircuitBreakerHttpClient(
+            new MockHttpClient(new MockResponse('', ['http_code' => 500])),
+            $circuitBreaker,
+            new DefaultFailureChecker(),
+            'api',
+            new HostServiceNameResolver(),
+        );
+
+        $response = $client->request('GET', 'https://example.com/path', [
+            'extra' => [
+                'circuit_breaker' => [
+                    'service_name' => static fn (string $method, string $url, array $options): ?string => null,
+                ],
+            ],
+        ]);
+
+        self::assertSame(500, $response->getStatusCode());
+        self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState('api'));
+        self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('api:example.com'));
     }
 
     public function testRecordsFailureForServerErrorResponseWhenStreaming(): void
@@ -331,7 +428,7 @@ final class CircuitBreakerHttpClientTest extends TestCase
         $storage = new InMemoryStorage();
         $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
         $client = new CircuitBreakerHttpClient(
-            new MockHttpClient(new MockResponse([new TransportException('Network failure')])),
+            new MockHttpClient(new MockResponse('', ['error' => 'host unreachable'])),
             $circuitBreaker,
             new DefaultFailureChecker(),
             'api',
@@ -352,7 +449,7 @@ final class CircuitBreakerHttpClientTest extends TestCase
                         'method' => 'GET',
                         'url' => 'https://example.com',
                         'status_code' => 200,
-                        'error' => 'Network failure',
+                        'error' => 'host unreachable',
                     ],
                 ],
             ], $records);
@@ -389,7 +486,7 @@ final class CircuitBreakerHttpClientTest extends TestCase
      * @param array<string, mixed> $options
      */
     #[TestWith([[], 'api'], 'default service name')]
-    #[TestWith([['extra' => ['circuit_breaker' => ['service_name' => 'payments']]], 'payments'], 'overridden service name')]
+    #[TestWith([['extra' => ['circuit_breaker' => ['service_name' => 'payments']]], 'api:payments'], 'overridden service name')]
     public function testReturnsSyntheticServiceUnavailableResponseWithoutCallingDecoratedClientWhenCircuitIsOpen(array $options, string $serviceName): void
     {
         $storage = new InMemoryStorage();
@@ -437,7 +534,7 @@ final class CircuitBreakerHttpClientTest extends TestCase
         self::assertSame(0, $innerClient->getRequestsCount());
     }
 
-    public function testRejectsInvalidRequestFailureChecker(): void
+    public function testRejectsServiceNameResolverReturningEmptyString(): void
     {
         $storage = new InMemoryStorage();
         $client = new CircuitBreakerHttpClient(
@@ -445,21 +542,19 @@ final class CircuitBreakerHttpClientTest extends TestCase
             new CircuitBreaker($storage),
             new DefaultFailureChecker(),
             'api',
+            new class implements ServiceNameResolverInterface {
+                /** @param array<string, mixed> $options */
+                public function resolve(string $method, string $url, array $options): ?string
+                {
+                    return '';
+                }
+            },
         );
 
-        /** @var array<string, mixed> $options */
-        $options = [
-            'extra' => [
-                'circuit_breaker' => [
-                    'failure_checker' => 'not_a_function',
-                ],
-            ],
-        ];
-
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Option "extra.circuit_breaker.failure_checker" must be callable.');
+        $this->expectExceptionMessage('The configured circuit breaker service name resolver must return null or a non-empty string.');
 
-        $client->request('GET', 'https://example.com', $options);
+        $client->request('GET', 'https://example.com');
     }
 
     public function testRejectsInvalidCircuitBreakerOptions(): void
@@ -482,6 +577,30 @@ final class CircuitBreakerHttpClientTest extends TestCase
         ]);
     }
 
+    #[TestWith([''], 'empty service name')]
+    #[TestWith([123], 'non-string service name')]
+    public function testRejectsServiceNameCallableReturningInvalidValue(mixed $returnValue): void
+    {
+        $storage = new InMemoryStorage();
+        $client = new CircuitBreakerHttpClient(
+            new MockHttpClient(new MockResponse('ok')),
+            new CircuitBreaker($storage),
+            new DefaultFailureChecker(),
+            'api',
+        );
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Option "extra.circuit_breaker.service_name" must be a non-empty string, or a callable returning null or a non-empty string.');
+
+        $client->request('GET', 'https://example.com', [
+            'extra' => [
+                'circuit_breaker' => [
+                    'service_name' => static fn (string $method, string $url, array $options): mixed => $returnValue,
+                ],
+            ],
+        ]);
+    }
+
     /**
      * @param array<string, mixed> $options
      */
@@ -498,7 +617,32 @@ final class CircuitBreakerHttpClientTest extends TestCase
         );
 
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Option "extra.circuit_breaker.service_name" must be a non-empty string.');
+        $this->expectExceptionMessage('Option "extra.circuit_breaker.service_name" must be a non-empty string, or a callable returning null or a non-empty string.');
+
+        $client->request('GET', 'https://example.com', $options);
+    }
+
+    public function testRejectsInvalidRequestFailureChecker(): void
+    {
+        $storage = new InMemoryStorage();
+        $client = new CircuitBreakerHttpClient(
+            new MockHttpClient(new MockResponse('ok')),
+            new CircuitBreaker($storage),
+            new DefaultFailureChecker(),
+            'api',
+        );
+
+        /** @var array<string, mixed> $options */
+        $options = [
+            'extra' => [
+                'circuit_breaker' => [
+                    'failure_checker' => 'not_a_function',
+                ],
+            ],
+        ];
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Option "extra.circuit_breaker.failure_checker" must be callable.');
 
         $client->request('GET', 'https://example.com', $options);
     }

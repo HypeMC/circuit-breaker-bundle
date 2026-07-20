@@ -8,11 +8,15 @@ use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerClearCommand;
 use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerForceCommand;
 use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerStatusCommand;
 use Bizkit\CircuitBreakerBundle\FailureChecker\DefaultFailureChecker;
+use Bizkit\CircuitBreakerBundle\ServiceNameResolver\HostServiceNameResolver;
 use GabrielAnhaia\PhpCircuitBreaker\Event\Psr14EventDispatcherBridge;
 use Symfony\Component\DependencyInjection\ServiceLocator;
 
 return static function (ContainerConfigurator $container): void {
     $container->services()
+        ->defaults()
+            ->private()
+
         ->set('bizkit_circuit_breaker.command.clear', CircuitBreakerClearCommand::class)
             ->args([service('bizkit_circuit_breaker.locator')])
             ->tag('console.command')
@@ -29,6 +33,8 @@ return static function (ContainerConfigurator $container): void {
             ->args([service('event_dispatcher')])
 
         ->set('bizkit_circuit_breaker.failure_checker.default', DefaultFailureChecker::class)
+
+        ->set('bizkit_circuit_breaker.service_name_resolver.host', HostServiceNameResolver::class)
 
         ->set('bizkit_circuit_breaker.locator', ServiceLocator::class)
             ->args([abstract_arg('configured circuit breaker services')])

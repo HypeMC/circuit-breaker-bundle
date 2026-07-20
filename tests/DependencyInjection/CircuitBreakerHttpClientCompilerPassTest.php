@@ -7,6 +7,7 @@ namespace Bizkit\CircuitBreakerBundle\Tests\DependencyInjection;
 use Bizkit\CircuitBreakerBundle\DependencyInjection\CircuitBreakerHttpClientCompilerPass;
 use Bizkit\CircuitBreakerBundle\FailureChecker\DefaultFailureChecker;
 use Bizkit\CircuitBreakerBundle\HttpClient\CircuitBreakerHttpClient;
+use Bizkit\CircuitBreakerBundle\ServiceNameResolver\HostServiceNameResolver;
 use GabrielAnhaia\PhpCircuitBreaker\CircuitBreaker;
 use GabrielAnhaia\PhpCircuitBreaker\CircuitBreakerConfig;
 use GabrielAnhaia\PhpCircuitBreaker\Storage\Psr6CacheStorage;
@@ -65,6 +66,7 @@ final class CircuitBreakerHttpClientCompilerPassTest extends TestCase
         self::assertSame('bizkit_circuit_breaker.http_client.circuit_breaker', (string) $decorator->getArgument(1));
         self::assertSame('bizkit_circuit_breaker.failure_checker.default', (string) $decorator->getArgument(2));
         self::assertSame('http_client', $decorator->getArgument(3));
+        self::assertCount(4, $decorator->getArguments());
         self::assertSame(['http_client', null, 30], $decorator->getDecoratedService());
         self::assertSame('setLogger', $decorator->getMethodCalls()[0][0]);
         self::assertSame('logger', (string) $loggerArg = $decorator->getMethodCalls()[0][1][0]);
@@ -95,6 +97,7 @@ final class CircuitBreakerHttpClientCompilerPassTest extends TestCase
         $decorator = $container->getDefinition($decoratorId);
         self::assertSame('bizkit_circuit_breaker.failure_checker.default', (string) $decorator->getArgument(2));
         self::assertSame('client1', $decorator->getArgument(3));
+        self::assertCount(4, $decorator->getArguments());
         self::assertSame(['client1', null, 30], $decorator->getDecoratedService());
 
         self::assertCommandServiceLocatorContains($container, ['client1']);
@@ -133,6 +136,41 @@ final class CircuitBreakerHttpClientCompilerPassTest extends TestCase
 
         $decorator = $container->getDefinition('bizkit_circuit_breaker.http_client.client1.decorator');
         self::assertSame('custom.failure_checker', (string) $decorator->getArgument(2));
+    }
+
+    public function testUsesCustomServiceNameResolverForMainHttpClient(): void
+    {
+        $container = self::createContainer();
+        $container->register('custom.service_name_resolver', HostServiceNameResolver::class);
+        $container->setParameter('.bizkit_circuit_breaker.http_client', self::config([
+            'storage' => 'cache.app',
+            'service_name_resolver' => 'custom.service_name_resolver',
+        ]));
+        $container->setParameter('.bizkit_circuit_breaker.scoped_http_clients', []);
+
+        (new CircuitBreakerHttpClientCompilerPass())->process($container);
+
+        $decorator = $container->getDefinition('bizkit_circuit_breaker.http_client.decorator');
+        self::assertSame('custom.service_name_resolver', (string) $decorator->getArgument(4));
+    }
+
+    public function testUsesCustomServiceNameResolverForScopedHttpClient(): void
+    {
+        $container = self::createContainer();
+        $container->register('client1', HttpClientInterface::class);
+        $container->register('custom.service_name_resolver', HostServiceNameResolver::class);
+        $container->setParameter('.bizkit_circuit_breaker.http_client', []);
+        $container->setParameter('.bizkit_circuit_breaker.scoped_http_clients', [
+            'client1' => self::config([
+                'storage' => 'cache.app',
+                'service_name_resolver' => 'custom.service_name_resolver',
+            ]),
+        ]);
+
+        (new CircuitBreakerHttpClientCompilerPass())->process($container);
+
+        $decorator = $container->getDefinition('bizkit_circuit_breaker.http_client.client1.decorator');
+        self::assertSame('custom.service_name_resolver', (string) $decorator->getArgument(4));
     }
 
     public function testReusesStorageWrapperForClientsWithSameStorageService(): void
@@ -201,6 +239,21 @@ final class CircuitBreakerHttpClientCompilerPassTest extends TestCase
         (new CircuitBreakerHttpClientCompilerPass())->process($container);
     }
 
+    public function testFailsForUnknownServiceNameResolverService(): void
+    {
+        $container = self::createContainer();
+        $container->setParameter('.bizkit_circuit_breaker.http_client', self::config([
+            'storage' => 'cache.app',
+            'service_name_resolver' => 'missing.service_name_resolver',
+        ]));
+        $container->setParameter('.bizkit_circuit_breaker.scoped_http_clients', []);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('missing.service_name_resolver');
+
+        (new CircuitBreakerHttpClientCompilerPass())->process($container);
+    }
+
     public function testSkipsClientsWithNullStorage(): void
     {
         $container = self::createContainer();
@@ -244,6 +297,7 @@ final class CircuitBreakerHttpClientCompilerPassTest extends TestCase
             'half_open_timeout' => 20,
             'exceptions_enabled' => false,
             'failure_checker' => 'bizkit_circuit_breaker.failure_checker.default',
+            'service_name_resolver' => null,
         ], $overrides);
     }
 
