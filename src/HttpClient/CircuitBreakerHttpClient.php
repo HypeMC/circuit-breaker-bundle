@@ -69,8 +69,8 @@ final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterf
         $exception = null;
         try {
             $canPass = $this->circuitBreaker->canPass($serviceName);
-        } catch (VendorOpenCircuitException $e) {
-            $exception = new OpenCircuitException($serviceName, $method, $url, $e);
+        } catch (VendorOpenCircuitException $previous) {
+            $exception = new OpenCircuitException($serviceName, $method, $url, $previous);
         }
 
         if (!$canPass) {
