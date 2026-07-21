@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bizkit\CircuitBreakerBundle\Tests\HttpClient;
 
+use Bizkit\CircuitBreakerBundle\Exception\OpenCircuitException;
 use Bizkit\CircuitBreakerBundle\FailureChecker\DefaultFailureChecker;
 use Bizkit\CircuitBreakerBundle\FailureChecker\FailureCheckerInterface;
 use Bizkit\CircuitBreakerBundle\HttpClient\CircuitBreakerHttpClient;
@@ -12,7 +13,7 @@ use Bizkit\CircuitBreakerBundle\ServiceNameResolver\ServiceNameResolverInterface
 use GabrielAnhaia\PhpCircuitBreaker\CircuitBreaker;
 use GabrielAnhaia\PhpCircuitBreaker\CircuitBreakerConfig;
 use GabrielAnhaia\PhpCircuitBreaker\CircuitState;
-use GabrielAnhaia\PhpCircuitBreaker\Exception\OpenCircuitException;
+use GabrielAnhaia\PhpCircuitBreaker\Exception\OpenCircuitException as VendorOpenCircuitException;
 use GabrielAnhaia\PhpCircuitBreaker\Storage\InMemoryStorage;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\TestWith;
@@ -28,6 +29,7 @@ use Symfony\Component\HttpClient\Response\MockResponse;
 use Symfony\Contracts\HttpClient\ChunkInterface;
 
 #[CoversClass(CircuitBreakerHttpClient::class)]
+#[CoversClass(OpenCircuitException::class)]
 final class CircuitBreakerHttpClientTest extends TestCase
 {
     /**
@@ -482,6 +484,35 @@ final class CircuitBreakerHttpClientTest extends TestCase
         ], $records);
     }
 
+    public function testLogsBlockedRequestWhenCircuitIsOpenAndExceptionsAreEnabled(): void
+    {
+        $records = [];
+        $storage = new InMemoryStorage();
+        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(exceptionsEnabled: true));
+        $circuitBreaker->forceState('api', CircuitState::OPEN);
+
+        $client = new CircuitBreakerHttpClient(new MockHttpClient(), $circuitBreaker, new DefaultFailureChecker(), 'api');
+        $client->setLogger(self::createLogger($records));
+
+        try {
+            $client->request('GET', 'https://example.com');
+            self::fail('Expected an open circuit exception.');
+        } catch (OpenCircuitException) {
+        }
+
+        self::assertSame([
+            [
+                'level' => 'debug',
+                'message' => 'Circuit breaker blocked HTTP request.',
+                'context' => [
+                    'service_name' => 'api',
+                    'method' => 'GET',
+                    'url' => 'https://example.com',
+                ],
+            ],
+        ], $records);
+    }
+
     /**
      * @param array<string, mixed> $options
      */
@@ -512,9 +543,15 @@ final class CircuitBreakerHttpClientTest extends TestCase
 
         $client = new CircuitBreakerHttpClient(new MockHttpClient(), $circuitBreaker, new DefaultFailureChecker(), 'api');
 
-        $this->expectException(OpenCircuitException::class);
-
-        $client->request('GET', 'https://example.com');
+        try {
+            $client->request('POST', 'https://example.com');
+            self::fail('Expected an open circuit exception.');
+        } catch (OpenCircuitException $exception) {
+            self::assertSame('api', $exception->serviceName);
+            self::assertSame('POST', $exception->method);
+            self::assertSame('https://example.com', $exception->url);
+            self::assertInstanceOf(VendorOpenCircuitException::class, $exception->getPrevious());
+        }
     }
 
     public function testResetResetsDecoratedClientWithoutClearingCircuitStorage(): void

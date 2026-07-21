@@ -172,11 +172,11 @@ By default, successful responses record successes when the response body complet
 errors record failures. If your API uses different status codes or response metadata to indicate failure, see
 [Custom Failure Rules](#custom-failure-rules).
 
-When the circuit is open and `exceptions_enabled` is `false`, the decorated client returns a synthetic `503` response.
-When `exceptions_enabled` is `true`, `gabrielanhaia/php-circuit-breaker` throws `OpenCircuitException`:
+When the circuit is open, `exceptions_enabled: false` returns a synthetic `503` response, while
+`exceptions_enabled: true` throws an `OpenCircuitException`:
 
 ```php
-use GabrielAnhaia\PhpCircuitBreaker\Exception\OpenCircuitException;
+use Bizkit\CircuitBreakerBundle\Exception\OpenCircuitException;
 
 try {
     $response = $client->request('GET', 'https://api.example.com/');

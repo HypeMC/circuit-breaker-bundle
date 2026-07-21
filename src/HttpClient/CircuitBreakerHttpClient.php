@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Bizkit\CircuitBreakerBundle\HttpClient;
 
+use Bizkit\CircuitBreakerBundle\Exception\OpenCircuitException;
 use Bizkit\CircuitBreakerBundle\FailureChecker\FailureCheckerInterface;
 use Bizkit\CircuitBreakerBundle\ServiceNameResolver\ServiceNameResolverInterface;
 use GabrielAnhaia\PhpCircuitBreaker\CircuitBreaker;
+use GabrielAnhaia\PhpCircuitBreaker\Exception\OpenCircuitException as VendorOpenCircuitException;
 use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerAwareTrait;
 use Symfony\Component\HttpClient\AsyncDecoratorTrait;
@@ -16,6 +18,7 @@ use Symfony\Component\HttpClient\Response\AsyncContext;
 use Symfony\Component\HttpClient\Response\AsyncResponse;
 use Symfony\Component\HttpClient\Response\JsonMockResponse;
 use Symfony\Contracts\HttpClient\ChunkInterface;
+use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
 use Symfony\Contracts\Service\ResetInterface;
@@ -46,6 +49,9 @@ final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterf
      *     },
      *     ...
      * } $options
+     *
+     * @throws OpenCircuitException
+     * @throws TransportExceptionInterface
      */
     public function request(string $method, string $url, array $options = []): ResponseInterface
     {
@@ -59,11 +65,23 @@ final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterf
 
         $serviceName = $this->resolveServiceName($method, $url, $options, $circuitBreakerOptions);
 
-        if (!$this->circuitBreaker->canPass($serviceName)) {
+        $canPass = false;
+        $exception = null;
+        try {
+            $canPass = $this->circuitBreaker->canPass($serviceName);
+        } catch (VendorOpenCircuitException $e) {
+            $exception = new OpenCircuitException($serviceName, $method, $url, $e);
+        }
+
+        if (!$canPass) {
             $this->logger?->debug(
                 'Circuit breaker blocked HTTP request.',
                 self::createLogContext($method, $url, $serviceName),
             );
+
+            if (null !== $exception) {
+                throw $exception;
+            }
 
             return self::createOpenCircuitResponse($method, $url, $options, $serviceName);
         }
