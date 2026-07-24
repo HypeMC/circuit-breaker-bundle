@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Bizkit\CircuitBreakerBundle\Tests\CircuitBreaker\Storage;
 
 use Bizkit\CircuitBreakerBundle\CircuitBreaker\CircuitState;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\Exception\InvalidCircuitRecordException;
 use Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage\CircuitRecord;
-use Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage\Exception\InvalidCircuitRecordException;
 use Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage\Psr6CacheStorage;
 use Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage\StorageInterface;
 use Bizkit\CircuitBreakerBundle\Tests\Fixtures\TestCacheItemPool;

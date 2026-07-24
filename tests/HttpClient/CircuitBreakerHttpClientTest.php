@@ -81,7 +81,7 @@ final class CircuitBreakerHttpClientTest extends TestCase
     {
         $circuitBreaker = new CircuitBreaker(new InMemoryStorage(), new Settings(
             failureThreshold: 1,
-            halfOpenMaxAttempts: 1,
+            halfOpenMaxConcurrentAttempts: 1,
         ));
         $circuitBreaker->forceState('api', CircuitState::HalfOpen);
         $client = new CircuitBreakerHttpClient(

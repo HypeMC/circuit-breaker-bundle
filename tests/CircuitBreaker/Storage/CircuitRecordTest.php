@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Bizkit\CircuitBreakerBundle\Tests\CircuitBreaker\Storage;
 
 use Bizkit\CircuitBreakerBundle\CircuitBreaker\CircuitState;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\Exception\InvalidCircuitRecordException;
 use Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage\CircuitRecord;
-use Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage\Exception\InvalidCircuitRecordException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\TestCase;
@@ -42,14 +42,14 @@ final class CircuitRecordTest extends TestCase
         self::assertSame(['active' => 11], $record->activeAttempts(10));
     }
 
-    public function testCreatesRecordWithOnlyActiveAttempts(): void
+    public function testCreatesRecordWithoutExpiredAttempts(): void
     {
         $record = new CircuitRecord(CircuitState::HalfOpen, successCount: 1, expiresAt: 20, attempts: [
             'expired' => 10,
             'active' => 11,
         ]);
 
-        $refreshedRecord = $record->withActiveAttempts(10);
+        $refreshedRecord = $record->withoutExpiredAttempts(10);
 
         self::assertNotSame($record, $refreshedRecord);
         self::assertSame(['active' => 11], $refreshedRecord->attempts);
@@ -61,7 +61,7 @@ final class CircuitRecordTest extends TestCase
     {
         $record = new CircuitRecord(CircuitState::HalfOpen, attempts: ['active' => 11]);
 
-        self::assertSame($record, $record->withActiveAttempts(10));
+        self::assertSame($record, $record->withoutExpiredAttempts(10));
     }
 
     public function testRemovesMatchingAttempt(): void

@@ -90,7 +90,7 @@ bizkit_circuit_breaker:
         failure_time_window:   20
         open_timeout:          30
         half_open_timeout:     20
-        half_open_max_attempts: 1
+        half_open_max_concurrent_attempts: 1
         half_open_attempt_timeout: 5
 
         # Service ID of the failure checker used to decide when a response
@@ -111,7 +111,7 @@ bizkit_circuit_breaker:
             failure_time_window:   20
             open_timeout:          60
             half_open_timeout:     20
-            half_open_max_attempts: 1
+            half_open_max_concurrent_attempts: 1
             half_open_attempt_timeout: 5
 
             # Service ID of the failure checker used to decide when a response
@@ -171,7 +171,7 @@ errors record failures. `failure_threshold` counts failures inside `failure_time
 circuit is closed do not reset that counter. Old failures expire naturally when the window elapses. If your API uses
 different status codes or response metadata to indicate failure, see [Custom Failure Rules](#custom-failure-rules).
 
-When the circuit is half-open, the decorated client allows up to `half_open_max_attempts` attempts at the same
+When the circuit is half-open, the decorated client allows up to `half_open_max_concurrent_attempts` attempts at the same
 time and uses `success_threshold` to decide when the circuit can close again. Each admitted attempt is reserved until
 its result is recorded or `half_open_attempt_timeout` expires. The PSR-6 storage backend uses regular read/write/delete
 operations, so distributed workers may still race on failure counters or half-open attempt reservations. Use shared cache

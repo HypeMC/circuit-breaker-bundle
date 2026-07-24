@@ -7,8 +7,8 @@ namespace Bizkit\CircuitBreakerBundle\CircuitBreaker;
 final class Attempt
 {
     private function __construct(
-        public readonly bool $allowed,
-        public readonly ?string $token = null,
+        private readonly bool $allowed,
+        private readonly ?string $token = null,
     ) {
     }
 
@@ -30,5 +30,10 @@ final class Attempt
     public function isBlocked(): bool
     {
         return !$this->allowed;
+    }
+
+    public function getToken(): ?string
+    {
+        return $this->token;
     }
 }

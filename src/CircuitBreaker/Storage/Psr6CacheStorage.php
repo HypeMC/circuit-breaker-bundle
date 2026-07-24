@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage;
 
-use Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage\Exception\InvalidCircuitRecordException;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\Exception\InvalidCircuitRecordException;
 use Psr\Cache\CacheItemPoolInterface;
 
 final class Psr6CacheStorage implements StorageInterface

@@ -27,8 +27,8 @@ final class CircuitBreakerTest extends TestCase
         self::assertTrue($circuitBreaker->allowsAttempt('api'));
 
         $attempt = $circuitBreaker->tryAcquireAttempt('api');
-        self::assertTrue($attempt->allowed);
-        self::assertNull($attempt->token);
+        self::assertTrue($attempt->isAllowed());
+        self::assertNull($attempt->getToken());
     }
 
     public function testOpensAfterFailureThresholdWithinFailureTimeWindow(): void
@@ -82,7 +82,7 @@ final class CircuitBreakerTest extends TestCase
         $circuitBreaker = new CircuitBreaker(new InMemoryStorage(), new Settings(
             failureThreshold: 1,
             openTimeout: 10,
-            halfOpenMaxAttempts: 1,
+            halfOpenMaxConcurrentAttempts: 1,
         ), $clock);
 
         $circuitBreaker->recordFailure('api');
@@ -90,9 +90,9 @@ final class CircuitBreakerTest extends TestCase
 
         self::assertTrue($circuitBreaker->allowsAttempt('api'));
         self::assertTrue($circuitBreaker->allowsAttempt('api'));
-        self::assertTrue($circuitBreaker->tryAcquireAttempt('api')->allowed);
+        self::assertTrue($circuitBreaker->tryAcquireAttempt('api')->isAllowed());
         self::assertFalse($circuitBreaker->allowsAttempt('api'));
-        self::assertFalse($circuitBreaker->tryAcquireAttempt('api')->allowed);
+        self::assertFalse($circuitBreaker->tryAcquireAttempt('api')->isAllowed());
         self::assertSame(CircuitState::HalfOpen, $circuitBreaker->getState('api'));
     }
 
@@ -103,20 +103,20 @@ final class CircuitBreakerTest extends TestCase
             failureThreshold: 1,
             successThreshold: 2,
             openTimeout: 10,
-            halfOpenMaxAttempts: 1,
+            halfOpenMaxConcurrentAttempts: 1,
         ), $clock);
 
         $circuitBreaker->recordFailure('api');
         $clock->sleep(10);
 
         $attempt = $circuitBreaker->tryAcquireAttempt('api');
-        self::assertTrue($attempt->allowed);
-        self::assertNotNull($attempt->token);
+        self::assertTrue($attempt->isAllowed());
+        self::assertNotNull($attempt->getToken());
 
         $circuitBreaker->recordSuccess('api', $attempt);
 
         self::assertTrue($circuitBreaker->allowsAttempt('api'));
-        self::assertTrue($circuitBreaker->tryAcquireAttempt('api')->allowed);
+        self::assertTrue($circuitBreaker->tryAcquireAttempt('api')->isAllowed());
     }
 
     public function testHalfOpenSuccessReleasesOnlyMatchingAttempt(): void
@@ -127,7 +127,7 @@ final class CircuitBreakerTest extends TestCase
             failureThreshold: 1,
             successThreshold: 3,
             openTimeout: 10,
-            halfOpenMaxAttempts: 2,
+            halfOpenMaxConcurrentAttempts: 2,
         ), $clock);
 
         $circuitBreaker->recordFailure('api');
@@ -135,15 +135,15 @@ final class CircuitBreakerTest extends TestCase
 
         $firstAttempt = $circuitBreaker->tryAcquireAttempt('api');
         $secondAttempt = $circuitBreaker->tryAcquireAttempt('api');
-        self::assertNotNull($firstAttempt->token);
-        self::assertNotNull($secondAttempt->token);
+        self::assertNotNull($firstAttempt->getToken());
+        self::assertNotNull($secondAttempt->getToken());
 
         $circuitBreaker->recordSuccess('api', $secondAttempt);
 
         $attempts = $storage->get('api')?->attempts;
         self::assertIsArray($attempts);
-        self::assertArrayHasKey($firstAttempt->token, $attempts);
-        self::assertArrayNotHasKey($secondAttempt->token, $attempts);
+        self::assertArrayHasKey($firstAttempt->getToken(), $attempts);
+        self::assertArrayNotHasKey($secondAttempt->getToken(), $attempts);
     }
 
     public function testHalfOpenRequiresSuccessThresholdBeforeClosing(): void
@@ -223,22 +223,22 @@ final class CircuitBreakerTest extends TestCase
             failureThreshold: 1,
             openTimeout: 10,
             halfOpenTimeout: 10,
-            halfOpenMaxAttempts: 1,
+            halfOpenMaxConcurrentAttempts: 1,
             halfOpenAttemptTimeout: 2,
         ), $clock);
 
         $circuitBreaker->recordFailure('api');
         $clock->sleep(10);
 
-        self::assertTrue($circuitBreaker->tryAcquireAttempt('api')->allowed);
-        self::assertFalse($circuitBreaker->tryAcquireAttempt('api')->allowed);
+        self::assertTrue($circuitBreaker->tryAcquireAttempt('api')->isAllowed());
+        self::assertFalse($circuitBreaker->tryAcquireAttempt('api')->isAllowed());
 
         $clock->sleep(1);
-        self::assertFalse($circuitBreaker->tryAcquireAttempt('api')->allowed);
+        self::assertFalse($circuitBreaker->tryAcquireAttempt('api')->isAllowed());
         self::assertSame(CircuitState::HalfOpen, $circuitBreaker->getState('api'));
 
         $clock->sleep(1);
-        self::assertTrue($circuitBreaker->tryAcquireAttempt('api')->allowed);
+        self::assertTrue($circuitBreaker->tryAcquireAttempt('api')->isAllowed());
         self::assertSame(CircuitState::HalfOpen, $circuitBreaker->getState('api'));
     }
 

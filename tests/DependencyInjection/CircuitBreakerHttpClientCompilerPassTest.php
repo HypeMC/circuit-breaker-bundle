@@ -297,7 +297,7 @@ final class CircuitBreakerHttpClientCompilerPassTest extends TestCase
             'failure_time_window' => 20,
             'open_timeout' => 30,
             'half_open_timeout' => 20,
-            'half_open_max_attempts' => 1,
+            'half_open_max_concurrent_attempts' => 1,
             'half_open_attempt_timeout' => 5,
             'failure_checker' => 'bizkit_circuit_breaker.failure_checker.default',
             'service_name_resolver' => null,

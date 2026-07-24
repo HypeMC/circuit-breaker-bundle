@@ -17,7 +17,7 @@ final class AttemptTest extends TestCase
 
         self::assertTrue($attempt->isAllowed());
         self::assertFalse($attempt->isBlocked());
-        self::assertSame('token', $attempt->token);
+        self::assertSame('token', $attempt->getToken());
     }
 
     public function testBlockedAttempt(): void
@@ -26,6 +26,6 @@ final class AttemptTest extends TestCase
 
         self::assertFalse($attempt->isAllowed());
         self::assertTrue($attempt->isBlocked());
-        self::assertNull($attempt->token);
+        self::assertNull($attempt->getToken());
     }
 }

@@ -23,7 +23,7 @@ final class CircuitBreaker
         $record = $this->refreshRecord($serviceName);
 
         return !$record->state->isOpen()
-            && (!$record->state->isHalfOpen() || \count($record->attempts) < $this->config->halfOpenMaxAttempts);
+            && (!$record->state->isHalfOpen() || \count($record->attempts) < $this->config->halfOpenMaxConcurrentAttempts);
     }
 
     public function tryAcquireAttempt(string $serviceName): Attempt
@@ -38,7 +38,7 @@ final class CircuitBreaker
             return Attempt::allowed();
         }
 
-        if (\count($record->attempts) >= $this->config->halfOpenMaxAttempts) {
+        if (\count($record->attempts) >= $this->config->halfOpenMaxConcurrentAttempts) {
             return Attempt::blocked();
         }
 
@@ -66,6 +66,12 @@ final class CircuitBreaker
         return Attempt::allowed($attemptToken);
     }
 
+    /**
+     * Unlike {@see recordSuccess()}, this method intentionally takes no {@see Attempt}:
+     * a failure always counts as evidence against the service, regardless of how
+     * the request was admitted, while a success may only influence the circuit
+     * when it comes from an attempt acquired via {@see tryAcquireAttempt()}.
+     */
     public function recordFailure(string $serviceName): void
     {
         $record = $this->refreshRecord($serviceName);
@@ -120,7 +126,7 @@ final class CircuitBreaker
             return;
         }
 
-        if (null === $attempt->token || !isset($record->attempts[$attempt->token])) {
+        if (null === $attempt->getToken() || !isset($record->attempts[$attempt->getToken()])) {
             return;
         }
 
@@ -131,7 +137,7 @@ final class CircuitBreaker
             return;
         }
 
-        $record = $record->withoutAttempt($attempt->token);
+        $record = $record->withoutAttempt($attempt->getToken());
         $this->storage->save(
             $serviceName,
             new CircuitRecord(
@@ -221,7 +227,7 @@ final class CircuitBreaker
         }
 
         if ($record->state->isHalfOpen()) {
-            $refreshedRecord = $record->withActiveAttempts($now);
+            $refreshedRecord = $record->withoutExpiredAttempts($now);
             if ($refreshedRecord !== $record) {
                 $record = $refreshedRecord;
                 $this->storage->save($serviceName, $record, $this->ttlUntil($record->expiresAt));

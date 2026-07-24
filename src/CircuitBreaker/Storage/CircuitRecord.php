@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage;
 
 use Bizkit\CircuitBreakerBundle\CircuitBreaker\CircuitState;
-use Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage\Exception\InvalidCircuitRecordException;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\Exception\InvalidCircuitRecordException;
 
 final class CircuitRecord
 {
@@ -48,7 +48,7 @@ final class CircuitRecord
         );
     }
 
-    public function withActiveAttempts(int $now): self
+    public function withoutExpiredAttempts(int $now): self
     {
         $attempts = $this->activeAttempts($now);
         if ($attempts === $this->attempts) {

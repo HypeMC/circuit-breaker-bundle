@@ -22,8 +22,8 @@ final class Settings
         /** Number of seconds a half-open circuit waits for attempt results before closing. */
         public readonly int $halfOpenTimeout = 20,
 
-        /** Maximum number of half-open attempts allowed at the same time. */
-        public readonly int $halfOpenMaxAttempts = 1,
+        /** Maximum number of half-open attempts allowed to be in flight at the same time; slots are freed when an attempt resolves or expires. */
+        public readonly int $halfOpenMaxConcurrentAttempts = 1,
 
         /** Number of seconds before an unresolved half-open attempt expires. */
         public readonly int $halfOpenAttemptTimeout = 5,

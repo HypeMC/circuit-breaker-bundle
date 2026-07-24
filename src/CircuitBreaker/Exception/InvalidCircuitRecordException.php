@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage\Exception;
+namespace Bizkit\CircuitBreakerBundle\CircuitBreaker\Exception;
 
 final class InvalidCircuitRecordException extends \UnexpectedValueException
 {
