@@ -62,7 +62,8 @@ final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterf
 
         $serviceName = $this->resolveServiceName($method, $url, $options, $circuitBreakerOptions);
 
-        if (!$this->circuitBreaker->tryAcquireAttempt($serviceName)) {
+        $attempt = $this->circuitBreaker->tryAcquireAttempt($serviceName);
+        if ($attempt->isBlocked()) {
             $this->logger?->debug(
                 'Circuit breaker blocked HTTP request.',
                 self::createLogContext($method, $url, $serviceName),
@@ -78,7 +79,7 @@ final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterf
             $method,
             $url,
             $options,
-            function (ChunkInterface $chunk, AsyncContext $context) use (&$recorded, $failureChecker, $serviceName, $method, $url): \Generator {
+            function (ChunkInterface $chunk, AsyncContext $context) use (&$recorded, $failureChecker, $serviceName, $attempt, $method, $url): \Generator {
                 if (!$recorded) {
                     if ($failureChecker($chunk, $context, $serviceName)) {
                         $this->circuitBreaker->recordFailure($serviceName);
@@ -88,7 +89,7 @@ final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterf
                         );
                         $recorded = true;
                     } elseif ($chunk->isLast()) {
-                        $this->circuitBreaker->recordSuccess($serviceName);
+                        $this->circuitBreaker->recordSuccess($serviceName, $attempt);
                         $this->logger?->debug(
                             'Circuit breaker recorded HTTP request success.',
                             self::createLogContext($method, $url, $serviceName, $chunk, $context),

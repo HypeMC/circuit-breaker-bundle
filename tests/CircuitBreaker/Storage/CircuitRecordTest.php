@@ -17,7 +17,7 @@ final class CircuitRecordTest extends TestCase
 {
     public function testConvertsToAndFromArray(): void
     {
-        $record = new CircuitRecord(CircuitState::HalfOpen, 2, 1, 10, 20, 1);
+        $record = new CircuitRecord(CircuitState::HalfOpen, 2, 1, 10, 20, ['first' => 25, 'second' => 30]);
 
         $value = $record->toArray();
 
@@ -27,18 +27,72 @@ final class CircuitRecordTest extends TestCase
             'success_count' => 1,
             'failure_window_started_at' => 10,
             'expires_at' => 20,
-            'attempt_count' => 1,
+            'attempts' => ['first' => 25, 'second' => 30],
         ], $value);
         self::assertEquals($record, CircuitRecord::fromArray($value));
+    }
+
+    public function testReturnsActiveAttempts(): void
+    {
+        $record = new CircuitRecord(CircuitState::HalfOpen, attempts: [
+            'expired' => 10,
+            'active' => 11,
+        ]);
+
+        self::assertSame(['active' => 11], $record->activeAttempts(10));
+    }
+
+    public function testCreatesRecordWithOnlyActiveAttempts(): void
+    {
+        $record = new CircuitRecord(CircuitState::HalfOpen, successCount: 1, expiresAt: 20, attempts: [
+            'expired' => 10,
+            'active' => 11,
+        ]);
+
+        $refreshedRecord = $record->withActiveAttempts(10);
+
+        self::assertNotSame($record, $refreshedRecord);
+        self::assertSame(['active' => 11], $refreshedRecord->attempts);
+        self::assertSame(1, $refreshedRecord->successCount);
+        self::assertSame(20, $refreshedRecord->expiresAt);
+    }
+
+    public function testReturnsSameRecordWhenAllAttemptsAreActive(): void
+    {
+        $record = new CircuitRecord(CircuitState::HalfOpen, attempts: ['active' => 11]);
+
+        self::assertSame($record, $record->withActiveAttempts(10));
+    }
+
+    public function testRemovesMatchingAttempt(): void
+    {
+        $record = new CircuitRecord(CircuitState::HalfOpen, attempts: [
+            'first' => 20,
+            'second' => 30,
+        ]);
+
+        $refreshedRecord = $record->withoutAttempt('second');
+
+        self::assertSame(['first' => 20], $refreshedRecord->attempts);
+    }
+
+    public function testReturnsSameRecordWhenRemovingMissingAttempt(): void
+    {
+        $record = new CircuitRecord(CircuitState::HalfOpen, attempts: ['first' => 20]);
+
+        self::assertSame($record, $record->withoutAttempt('missing'));
+        self::assertSame($record, $record->withoutAttempt(null));
     }
 
     /**
      * @param array<string, mixed> $value
      */
     #[TestWith([[]])]
-    #[TestWith([['state' => 'open', 'failure_count' => '1', 'success_count' => 0, 'failure_window_started_at' => null, 'expires_at' => null, 'attempt_count' => 0]])]
+    #[TestWith([['state' => 'open', 'failure_count' => '1', 'success_count' => 0, 'failure_window_started_at' => null, 'expires_at' => null, 'attempts' => []]])]
     #[TestWith([['state' => 'open', 'failure_count' => 1, 'success_count' => 0, 'expires_at' => null]], 'missing failure window')]
-    #[TestWith([['state' => 'open', 'failure_count' => 1, 'success_count' => 0, 'failure_window_started_at' => null, 'expires_at' => null]], 'missing attempt count')]
+    #[TestWith([['state' => 'open', 'failure_count' => 1, 'success_count' => 0, 'failure_window_started_at' => null, 'expires_at' => null]], 'missing attempts')]
+    #[TestWith([['state' => 'open', 'failure_count' => 1, 'success_count' => 0, 'failure_window_started_at' => null, 'expires_at' => null, 'attempts' => ['token' => '1']]], 'non-integer attempt expiry')]
+    #[TestWith([['state' => 'open', 'failure_count' => 1, 'success_count' => 0, 'failure_window_started_at' => null, 'expires_at' => null, 'attempts' => [1 => 10]]], 'non-string attempt token')]
     public function testRejectsInvalidArrayShape(array $value): void
     {
         $this->expectException(InvalidCircuitRecordException::class);
@@ -58,7 +112,7 @@ final class CircuitRecordTest extends TestCase
             'success_count' => 0,
             'failure_window_started_at' => null,
             'expires_at' => null,
-            'attempt_count' => 0,
+            'attempts' => [],
         ]);
     }
 }

@@ -91,6 +91,7 @@ bizkit_circuit_breaker:
         open_timeout:          30
         half_open_timeout:     20
         half_open_max_attempts: 1
+        half_open_attempt_timeout: 5
 
         # Service ID of the failure checker used to decide when a response
         # should count as a circuit breaker failure.
@@ -111,6 +112,7 @@ bizkit_circuit_breaker:
             open_timeout:          60
             half_open_timeout:     20
             half_open_max_attempts: 1
+            half_open_attempt_timeout: 5
 
             # Service ID of the failure checker used to decide when a response
             # should count as a circuit breaker failure.
@@ -170,11 +172,10 @@ circuit is closed do not reset that counter. Old failures expire naturally when 
 different status codes or response metadata to indicate failure, see [Custom Failure Rules](#custom-failure-rules).
 
 When the circuit is half-open, the decorated client allows up to `half_open_max_attempts` attempts at the same
-time and uses `success_threshold` to decide when the circuit can close again. The PSR-6 storage backend uses regular
-read/write/delete operations, so distributed workers may still race on failure counters or half-open attempt reservations.
-If a worker stops after an attempt is admitted but before the result is recorded, that attempt remains reserved until
-`half_open_timeout`. While the attempt limit is exhausted, the half-open circuit blocks additional attempts. Use shared
-cache storage for shared state, but do not treat it as an atomic coordination primitive.
+time and uses `success_threshold` to decide when the circuit can close again. Each admitted attempt is reserved until
+its result is recorded or `half_open_attempt_timeout` expires. The PSR-6 storage backend uses regular read/write/delete
+operations, so distributed workers may still race on failure counters or half-open attempt reservations. Use shared cache
+storage for shared state, but do not treat it as an atomic coordination primitive.
 
 When the circuit is open, the decorated client throws an `OpenCircuitException` before the remote service is called:
 

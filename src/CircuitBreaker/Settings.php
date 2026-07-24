@@ -24,6 +24,9 @@ final class Settings
 
         /** Maximum number of half-open attempts allowed at the same time. */
         public readonly int $halfOpenMaxAttempts = 1,
+
+        /** Number of seconds before an unresolved half-open attempt expires. */
+        public readonly int $halfOpenAttemptTimeout = 5,
     ) {
     }
 }

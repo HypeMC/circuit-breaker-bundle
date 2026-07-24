@@ -35,6 +35,7 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
          *     open_timeout: int,
          *     half_open_timeout: int,
          *     half_open_max_attempts: int,
+         *     half_open_attempt_timeout: int,
          *     failure_checker: ?string,
          *     service_name_resolver: ?string,
          * }|array{} $httpClientConfig
@@ -59,6 +60,7 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
          *     open_timeout: int,
          *     half_open_timeout: int,
          *     half_open_max_attempts: int,
+         *     half_open_attempt_timeout: int,
          *     failure_checker: ?string,
          *     service_name_resolver: ?string,
          * }> $scopedClients
@@ -89,6 +91,7 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
      *     open_timeout: int,
      *     half_open_timeout: int,
      *     half_open_max_attempts: int,
+     *     half_open_attempt_timeout: int,
      *     failure_checker: ?string,
      *     service_name_resolver: ?string,
      * } $config
@@ -133,6 +136,7 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
                 $config['open_timeout'],
                 $config['half_open_timeout'],
                 $config['half_open_max_attempts'],
+                $config['half_open_attempt_timeout'],
             ]);
 
         $container->register($circuitBreakerId = $idPrefix.'.circuit_breaker', CircuitBreaker::class)

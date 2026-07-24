@@ -23,23 +23,33 @@ final class CircuitBreaker
         $record = $this->refreshRecord($serviceName);
 
         return !$record->state->isOpen()
-            && (!$record->state->isHalfOpen() || $record->attemptCount < $this->config->halfOpenMaxAttempts);
+            && (!$record->state->isHalfOpen() || \count($record->attempts) < $this->config->halfOpenMaxAttempts);
     }
 
-    public function tryAcquireAttempt(string $serviceName): bool
+    public function tryAcquireAttempt(string $serviceName): Attempt
     {
         $record = $this->refreshRecord($serviceName);
 
         if ($record->state->isOpen()) {
-            return false;
+            return Attempt::blocked();
         }
 
         if ($record->state->isClosed()) {
-            return true;
+            return Attempt::allowed();
         }
 
-        if ($record->attemptCount >= $this->config->halfOpenMaxAttempts) {
-            return false;
+        if (\count($record->attempts) >= $this->config->halfOpenMaxAttempts) {
+            return Attempt::blocked();
+        }
+
+        $now = $this->timestamp();
+        do {
+            $attemptToken = self::createAttemptToken();
+        } while (isset($record->attempts[$attemptToken]));
+
+        $attemptExpiresAt = $now + $this->config->halfOpenAttemptTimeout;
+        if (null !== $record->expiresAt) {
+            $attemptExpiresAt = min($attemptExpiresAt, $record->expiresAt);
         }
 
         $this->storage->save(
@@ -48,12 +58,12 @@ final class CircuitBreaker
                 CircuitState::HalfOpen,
                 successCount: $record->successCount,
                 expiresAt: $record->expiresAt,
-                attemptCount: $record->attemptCount + 1,
+                attempts: $record->attempts + [$attemptToken => $attemptExpiresAt],
             ),
-            null === $record->expiresAt ? null : max(1, $record->expiresAt - $this->timestamp() + 1),
+            $this->ttlUntil($record->expiresAt),
         );
 
-        return true;
+        return Attempt::allowed($attemptToken);
     }
 
     public function recordFailure(string $serviceName): void
@@ -94,8 +104,12 @@ final class CircuitBreaker
         );
     }
 
-    public function recordSuccess(string $serviceName): void
+    public function recordSuccess(string $serviceName, Attempt $attempt): void
     {
+        if ($attempt->isBlocked()) {
+            return;
+        }
+
         $record = $this->refreshRecord($serviceName);
 
         if ($record->state->isOpen()) {
@@ -106,6 +120,10 @@ final class CircuitBreaker
             return;
         }
 
+        if (null === $attempt->token || !isset($record->attempts[$attempt->token])) {
+            return;
+        }
+
         $successCount = $record->successCount + 1;
         if ($successCount >= $this->config->successThreshold) {
             $this->closeCircuit($serviceName);
@@ -113,16 +131,16 @@ final class CircuitBreaker
             return;
         }
 
-        $ttlSeconds = null === $record->expiresAt ? null : max(1, $record->expiresAt - $this->timestamp() + 1);
+        $record = $record->withoutAttempt($attempt->token);
         $this->storage->save(
             $serviceName,
             new CircuitRecord(
                 CircuitState::HalfOpen,
                 successCount: $successCount,
                 expiresAt: $record->expiresAt,
-                attemptCount: max(0, $record->attemptCount - 1),
+                attempts: $record->attempts,
             ),
-            $ttlSeconds,
+            $this->ttlUntil($record->expiresAt),
         );
     }
 
@@ -191,7 +209,7 @@ final class CircuitBreaker
             }
 
             $record = new CircuitRecord(CircuitState::HalfOpen, expiresAt: $halfOpenExpiresAt);
-            $this->storage->save($serviceName, $record, max(1, $halfOpenExpiresAt - $now + 1));
+            $this->storage->save($serviceName, $record, $this->ttlUntil($halfOpenExpiresAt));
 
             return $record;
         }
@@ -200,6 +218,16 @@ final class CircuitBreaker
             $this->closeCircuit($serviceName);
 
             return new CircuitRecord(CircuitState::Closed);
+        }
+
+        if ($record->state->isHalfOpen()) {
+            $refreshedRecord = $record->withActiveAttempts($now);
+            if ($refreshedRecord !== $record) {
+                $record = $refreshedRecord;
+                $this->storage->save($serviceName, $record, $this->ttlUntil($record->expiresAt));
+            }
+
+            return $record;
         }
 
         if ($record->state->isClosed() && null !== $record->failureWindowStartedAt
@@ -211,6 +239,20 @@ final class CircuitBreaker
         }
 
         return $record;
+    }
+
+    private function ttlUntil(?int $expiresAt): ?int
+    {
+        if (null === $expiresAt) {
+            return null;
+        }
+
+        return max(1, $expiresAt - $this->timestamp() + 1);
+    }
+
+    private static function createAttemptToken(): string
+    {
+        return bin2hex(random_bytes(16));
     }
 
     private function timestamp(): int

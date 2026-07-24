@@ -72,6 +72,11 @@ return static function (DefinitionConfigurator $definition): void {
                         ->defaultValue(1)
                         ->min(1)
                     ->end()
+                    ->integerNode('half_open_attempt_timeout')
+                        ->info('Number of seconds before an unresolved half-open attempt expires.')
+                        ->defaultValue(5)
+                        ->min(1)
+                    ->end()
                     ->append($stringNode(
                         'failure_checker',
                         'Service ID of the failure checker used to decide when a response should count as a circuit breaker failure.',
@@ -117,6 +122,11 @@ return static function (DefinitionConfigurator $definition): void {
                         ->integerNode('half_open_max_attempts')
                             ->info('Maximum number of half-open attempts allowed at the same time.')
                             ->defaultValue(1)
+                            ->min(1)
+                        ->end()
+                        ->integerNode('half_open_attempt_timeout')
+                            ->info('Number of seconds before an unresolved half-open attempt expires.')
+                            ->defaultValue(5)
                             ->min(1)
                         ->end()
                         ->append($stringNode(
