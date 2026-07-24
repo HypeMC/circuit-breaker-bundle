@@ -43,9 +43,7 @@ final class CircuitBreaker
         }
 
         $now = $this->timestamp();
-        do {
-            $attemptToken = self::createAttemptToken();
-        } while (isset($record->attempts[$attemptToken]));
+        $attemptToken = self::createAttemptToken();
 
         $attemptExpiresAt = $now + $this->config->halfOpenAttemptTimeout;
         if (null !== $record->expiresAt) {
@@ -138,6 +136,7 @@ final class CircuitBreaker
         }
 
         $record = $record->withoutAttempt($attempt->getToken());
+
         $this->storage->save(
             $serviceName,
             new CircuitRecord(

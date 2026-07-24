@@ -43,9 +43,9 @@ final class BizkitCircuitBreakerBundleTest extends TestCase
             'http_client' => [
                 'storage' => 'cache.app',
                 'failure_threshold' => 6,
-                'success_threshold' => 2,
                 'failure_time_window' => 40,
                 'open_timeout' => 50,
+                'success_threshold' => 2,
                 'half_open_timeout' => 15,
                 'half_open_max_concurrent_attempts' => 2,
                 'half_open_attempt_timeout' => 7,
@@ -57,9 +57,9 @@ final class BizkitCircuitBreakerBundleTest extends TestCase
         self::assertSame([
             'storage' => 'cache.app',
             'failure_threshold' => 6,
-            'success_threshold' => 2,
             'failure_time_window' => 40,
             'open_timeout' => 50,
+            'success_threshold' => 2,
             'half_open_timeout' => 15,
             'half_open_max_concurrent_attempts' => 2,
             'half_open_attempt_timeout' => 7,
@@ -89,9 +89,9 @@ final class BizkitCircuitBreakerBundleTest extends TestCase
             'client1' => [
                 'storage' => 'cache.client1',
                 'failure_threshold' => 2,
-                'success_threshold' => 1,
                 'failure_time_window' => 20,
                 'open_timeout' => 30,
+                'success_threshold' => 1,
                 'half_open_timeout' => 20,
                 'half_open_max_concurrent_attempts' => 1,
                 'half_open_attempt_timeout' => 5,

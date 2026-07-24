@@ -94,7 +94,7 @@ final class CircuitBreakerHttpClientCompilerPassTest extends TestCase
         self::assertSame('cache.app', (string) $storage->getArgument(0));
 
         $config = $container->getDefinition($configId);
-        self::assertSame([2, 1, 20, 30, 17, 1, 5], $config->getArguments());
+        self::assertSame([2, 20, 30, 1, 17, 1, 5], $config->getArguments());
 
         $decorator = $container->getDefinition($decoratorId);
         self::assertSame('bizkit_circuit_breaker.failure_checker.default', (string) $decorator->getArgument(2));
@@ -293,9 +293,9 @@ final class CircuitBreakerHttpClientCompilerPassTest extends TestCase
         return array_replace([
             'storage' => null,
             'failure_threshold' => 5,
-            'success_threshold' => 1,
             'failure_time_window' => 20,
             'open_timeout' => 30,
+            'success_threshold' => 1,
             'half_open_timeout' => 20,
             'half_open_max_concurrent_attempts' => 1,
             'half_open_attempt_timeout' => 5,

@@ -101,8 +101,8 @@ final class CircuitBreakerTest extends TestCase
         $clock = new MockClock();
         $circuitBreaker = new CircuitBreaker(new InMemoryStorage(), new Settings(
             failureThreshold: 1,
-            successThreshold: 2,
             openTimeout: 10,
+            successThreshold: 2,
             halfOpenMaxConcurrentAttempts: 1,
         ), $clock);
 
@@ -125,8 +125,8 @@ final class CircuitBreakerTest extends TestCase
         $storage = new InMemoryStorage();
         $circuitBreaker = new CircuitBreaker($storage, new Settings(
             failureThreshold: 1,
-            successThreshold: 3,
             openTimeout: 10,
+            successThreshold: 3,
             halfOpenMaxConcurrentAttempts: 2,
         ), $clock);
 
@@ -151,8 +151,8 @@ final class CircuitBreakerTest extends TestCase
         $clock = new MockClock();
         $circuitBreaker = new CircuitBreaker(new InMemoryStorage(), new Settings(
             failureThreshold: 1,
-            successThreshold: 2,
             openTimeout: 10,
+            successThreshold: 2,
             halfOpenTimeout: 10,
         ), $clock);
 
@@ -174,8 +174,8 @@ final class CircuitBreakerTest extends TestCase
         $clock = new MockClock();
         $circuitBreaker = new CircuitBreaker(new InMemoryStorage(), new Settings(
             failureThreshold: 1,
-            successThreshold: 1,
             openTimeout: 10,
+            successThreshold: 1,
         ), $clock);
 
         $circuitBreaker->recordFailure('api');

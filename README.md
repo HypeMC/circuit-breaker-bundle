@@ -86,9 +86,9 @@ bizkit_circuit_breaker:
         # Service ID of the PSR-6 cache pool used to store circuit breaker state.
         storage:               cache.circuit_breaker
         failure_threshold:     5
-        success_threshold:     1
         failure_time_window:   20
         open_timeout:          30
+        success_threshold:     1
         half_open_timeout:     20
         half_open_max_concurrent_attempts: 1
         half_open_attempt_timeout: 5
@@ -107,9 +107,9 @@ bizkit_circuit_breaker:
             # Service ID of the PSR-6 cache pool used to store circuit breaker state.
             storage:               cache.circuit_breaker
             failure_threshold:     3
-            success_threshold:     1
             failure_time_window:   20
             open_timeout:          60
+            success_threshold:     1
             half_open_timeout:     20
             half_open_max_concurrent_attempts: 1
             half_open_attempt_timeout: 5

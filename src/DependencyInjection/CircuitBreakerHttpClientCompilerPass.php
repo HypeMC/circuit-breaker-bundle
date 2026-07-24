@@ -30,9 +30,9 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
          * @var array{
          *     storage: ?string,
          *     failure_threshold: int,
-         *     success_threshold: int,
          *     failure_time_window: int,
          *     open_timeout: int,
+         *     success_threshold: int,
          *     half_open_timeout: int,
          *     half_open_max_concurrent_attempts: int,
          *     half_open_attempt_timeout: int,
@@ -55,9 +55,9 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
          * @var array<string, array{
          *     storage: ?string,
          *     failure_threshold: int,
-         *     success_threshold: int,
          *     failure_time_window: int,
          *     open_timeout: int,
+         *     success_threshold: int,
          *     half_open_timeout: int,
          *     half_open_max_concurrent_attempts: int,
          *     half_open_attempt_timeout: int,
@@ -86,9 +86,9 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
      * @param array{
      *     storage: string,
      *     failure_threshold: int,
-     *     success_threshold: int,
      *     failure_time_window: int,
      *     open_timeout: int,
+     *     success_threshold: int,
      *     half_open_timeout: int,
      *     half_open_max_concurrent_attempts: int,
      *     half_open_attempt_timeout: int,
@@ -131,9 +131,9 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
         $container->register($configId = $idPrefix.'.config', Settings::class)
             ->setArguments([
                 $config['failure_threshold'],
-                $config['success_threshold'],
                 $config['failure_time_window'],
                 $config['open_timeout'],
+                $config['success_threshold'],
                 $config['half_open_timeout'],
                 $config['half_open_max_concurrent_attempts'],
                 $config['half_open_attempt_timeout'],

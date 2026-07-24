@@ -23,21 +23,6 @@ final class CircuitRecord
     }
 
     /**
-     * @return array{state: string, failure_count: int, success_count: int, failure_window_started_at: ?int, expires_at: ?int, attempts: array<string, int>}
-     */
-    public function toArray(): array
-    {
-        return [
-            'state' => $this->state->value,
-            'failure_count' => $this->failureCount,
-            'success_count' => $this->successCount,
-            'failure_window_started_at' => $this->failureWindowStartedAt,
-            'expires_at' => $this->expiresAt,
-            'attempts' => $this->attempts,
-        ];
-    }
-
-    /**
      * @return array<string, int>
      */
     public function activeAttempts(int $now): array
@@ -82,6 +67,21 @@ final class CircuitRecord
             $this->expiresAt,
             $attempts,
         );
+    }
+
+    /**
+     * @return array{state: string, failure_count: int, success_count: int, failure_window_started_at: ?int, expires_at: ?int, attempts: array<string, int>}
+     */
+    public function toArray(): array
+    {
+        return [
+            'state' => $this->state->value,
+            'failure_count' => $this->failureCount,
+            'success_count' => $this->successCount,
+            'failure_window_started_at' => $this->failureWindowStartedAt,
+            'expires_at' => $this->expiresAt,
+            'attempts' => $this->attempts,
+        ];
     }
 
     /**
