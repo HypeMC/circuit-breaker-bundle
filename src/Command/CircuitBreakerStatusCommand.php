@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Bizkit\CircuitBreakerBundle\Command;
 
-use GabrielAnhaia\PhpCircuitBreaker\CircuitBreaker;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\CircuitBreaker;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;

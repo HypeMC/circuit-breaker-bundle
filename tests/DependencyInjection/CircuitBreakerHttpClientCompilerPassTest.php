@@ -4,22 +4,22 @@ declare(strict_types=1);
 
 namespace Bizkit\CircuitBreakerBundle\Tests\DependencyInjection;
 
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\CircuitBreaker;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\Settings;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage\Psr6CacheStorage;
 use Bizkit\CircuitBreakerBundle\DependencyInjection\CircuitBreakerHttpClientCompilerPass;
 use Bizkit\CircuitBreakerBundle\FailureChecker\DefaultFailureChecker;
 use Bizkit\CircuitBreakerBundle\HttpClient\CircuitBreakerHttpClient;
 use Bizkit\CircuitBreakerBundle\ServiceNameResolver\HostServiceNameResolver;
-use GabrielAnhaia\PhpCircuitBreaker\CircuitBreaker;
-use GabrielAnhaia\PhpCircuitBreaker\CircuitBreakerConfig;
-use GabrielAnhaia\PhpCircuitBreaker\Storage\Psr6CacheStorage;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Psr\Cache\CacheItemPoolInterface;
 use Symfony\Component\DependencyInjection\Argument\AbstractArgument;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
+use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Exception\InvalidArgumentException;
 use Symfony\Component\DependencyInjection\ServiceLocator;
-use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 #[CoversClass(CircuitBreakerHttpClientCompilerPass::class)]
@@ -52,14 +52,12 @@ final class CircuitBreakerHttpClientCompilerPassTest extends TestCase
         self::assertSame('cache.app', (string) $storage->getArgument(0));
 
         $config = $container->getDefinition($configId);
-        self::assertSame(CircuitBreakerConfig::class, $config->getClass());
+        self::assertSame(Settings::class, $config->getClass());
 
         $circuitBreaker = $container->getDefinition($circuitBreakerId);
         self::assertSame(CircuitBreaker::class, $circuitBreaker->getClass());
         self::assertSame($storageId, (string) $circuitBreaker->getArgument(0));
         self::assertSame('bizkit_circuit_breaker.http_client.config', (string) $circuitBreaker->getArgument(1));
-        self::assertSame('bizkit_circuit_breaker.event_dispatcher', (string) $eventDispatcherArg = $circuitBreaker->getArgument(2));
-        self::assertSame(ContainerInterface::IGNORE_ON_INVALID_REFERENCE, $eventDispatcherArg->getInvalidBehavior());
 
         $decorator = $container->getDefinition($decoratorId);
         self::assertSame(CircuitBreakerHttpClient::class, $decorator->getClass());
@@ -82,7 +80,7 @@ final class CircuitBreakerHttpClientCompilerPassTest extends TestCase
         $container->register('client1', HttpClientInterface::class);
         $container->setParameter('.bizkit_circuit_breaker.http_client', []);
         $container->setParameter('.bizkit_circuit_breaker.scoped_http_clients', [
-            'client1' => self::config(['storage' => 'cache.app', 'failure_threshold' => 2]),
+            'client1' => self::config(['storage' => 'cache.app', 'failure_threshold' => 2, 'half_open_timeout' => 17]),
         ]);
 
         (new CircuitBreakerHttpClientCompilerPass())->process($container);
@@ -91,8 +89,12 @@ final class CircuitBreakerHttpClientCompilerPassTest extends TestCase
         self::assertTrue($container->hasDefinition($configId = 'bizkit_circuit_breaker.http_client.client1.config'));
         self::assertTrue($container->hasDefinition($decoratorId = 'bizkit_circuit_breaker.http_client.client1.decorator'));
 
+        $storage = $container->getDefinition($storageId);
+        self::assertSame(Psr6CacheStorage::class, $storage->getClass());
+        self::assertSame('cache.app', (string) $storage->getArgument(0));
+
         $config = $container->getDefinition($configId);
-        self::assertSame([2, 1, 20, 30, 20, false], $config->getArguments());
+        self::assertSame([2, 1, 20, 30, 17, 1], $config->getArguments());
 
         $decorator = $container->getDefinition($decoratorId);
         self::assertSame('bizkit_circuit_breaker.failure_checker.default', (string) $decorator->getArgument(2));
@@ -184,13 +186,13 @@ final class CircuitBreakerHttpClientCompilerPassTest extends TestCase
 
         (new CircuitBreakerHttpClientCompilerPass())->process($container);
 
-        self::assertTrue($container->hasDefinition($storageId = 'bizkit_circuit_breaker.storage.cache.app'));
+        self::assertTrue($container->hasDefinition('bizkit_circuit_breaker.storage.cache.app'));
         self::assertTrue($container->hasDefinition('bizkit_circuit_breaker.http_client.decorator'));
         self::assertTrue($container->hasDefinition('bizkit_circuit_breaker.http_client.client1.decorator'));
 
         self::assertCount(1, array_filter(
-            array_keys($container->getDefinitions()),
-            static fn (string $id): bool => str_starts_with($id, 'bizkit_circuit_breaker.storage.'),
+            $container->getDefinitions(),
+            static fn (Definition $definition): bool => Psr6CacheStorage::class === $definition->getClass(),
         ));
 
         self::assertCommandServiceLocatorContains($container, ['http_client', 'client1']);
@@ -282,23 +284,23 @@ final class CircuitBreakerHttpClientCompilerPassTest extends TestCase
     }
 
     /**
-     * @param array<string, mixed> $overrides
+     * @param array<string, mixed> $configOverrides
      *
      * @return array<string, mixed>
      */
-    private static function config(array $overrides = []): array
+    private static function config(array $configOverrides = []): array
     {
         return array_replace([
             'storage' => null,
             'failure_threshold' => 5,
             'success_threshold' => 1,
-            'time_window' => 20,
+            'failure_time_window' => 20,
             'open_timeout' => 30,
             'half_open_timeout' => 20,
-            'exceptions_enabled' => false,
+            'half_open_max_attempts' => 1,
             'failure_checker' => 'bizkit_circuit_breaker.failure_checker.default',
             'service_name_resolver' => null,
-        ], $overrides);
+        ], $configOverrides);
     }
 
     private static function createContainer(): ContainerBuilder
@@ -306,7 +308,6 @@ final class CircuitBreakerHttpClientCompilerPassTest extends TestCase
         $container = new ContainerBuilder();
         $container->register('http_client', HttpClientInterface::class);
         $container->register('cache.app', CacheItemPoolInterface::class);
-        $container->register('event_dispatcher', EventDispatcherInterface::class);
         $container->register('bizkit_circuit_breaker.failure_checker.default', DefaultFailureChecker::class);
         $container->register('bizkit_circuit_breaker.locator', ServiceLocator::class)->setArguments([new AbstractArgument()]);
 

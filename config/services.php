@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
-use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerClearCommand;
-use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerForceCommand;
+use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerCloseCommand;
+use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerOpenCommand;
 use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerStatusCommand;
 use Bizkit\CircuitBreakerBundle\FailureChecker\DefaultFailureChecker;
 use Bizkit\CircuitBreakerBundle\ServiceNameResolver\HostServiceNameResolver;
-use GabrielAnhaia\PhpCircuitBreaker\Event\Psr14EventDispatcherBridge;
 use Symfony\Component\DependencyInjection\ServiceLocator;
 
 return static function (ContainerConfigurator $container): void {
@@ -17,20 +16,17 @@ return static function (ContainerConfigurator $container): void {
         ->defaults()
             ->private()
 
-        ->set('bizkit_circuit_breaker.command.clear', CircuitBreakerClearCommand::class)
+        ->set('bizkit_circuit_breaker.command.close', CircuitBreakerCloseCommand::class)
             ->args([service('bizkit_circuit_breaker.locator')])
             ->tag('console.command')
 
-        ->set('bizkit_circuit_breaker.command.force', CircuitBreakerForceCommand::class)
+        ->set('bizkit_circuit_breaker.command.open', CircuitBreakerOpenCommand::class)
             ->args([service('bizkit_circuit_breaker.locator')])
             ->tag('console.command')
 
         ->set('bizkit_circuit_breaker.command.status', CircuitBreakerStatusCommand::class)
             ->args([service('bizkit_circuit_breaker.locator')])
             ->tag('console.command')
-
-        ->set('bizkit_circuit_breaker.event_dispatcher', Psr14EventDispatcherBridge::class)
-            ->args([service('event_dispatcher')])
 
         ->set('bizkit_circuit_breaker.failure_checker.default', DefaultFailureChecker::class)
 

@@ -10,8 +10,7 @@ final class OpenCircuitException extends \RuntimeException
         public readonly string $serviceName,
         public readonly string $method,
         public readonly string $url,
-        \Throwable $previous,
     ) {
-        parent::__construct(\sprintf('Circuit breaker is open for service name "%s".', $serviceName), 0, $previous);
+        parent::__construct(\sprintf('Circuit breaker is open for service name "%s".', $serviceName));
     }
 }

@@ -35,13 +35,9 @@ final class BizkitCircuitBreakerBundle extends AbstractBundle
         $configurator->import(\dirname(__DIR__).'/config/services.php');
 
         if (!class_exists(Command::class)) {
-            $container->removeDefinition('bizkit_circuit_breaker.command.clear');
-            $container->removeDefinition('bizkit_circuit_breaker.command.force');
+            $container->removeDefinition('bizkit_circuit_breaker.command.close');
+            $container->removeDefinition('bizkit_circuit_breaker.command.open');
             $container->removeDefinition('bizkit_circuit_breaker.command.status');
-        }
-
-        if (!$container->has('event_dispatcher')) {
-            $container->removeDefinition('bizkit_circuit_breaker.event_dispatcher');
         }
 
         $container->setParameter('.bizkit_circuit_breaker.http_client', $config['http_client'] ?? []);

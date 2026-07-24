@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Bizkit\CircuitBreakerBundle\Tests\Command;
 
-use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerClearCommand;
-use GabrielAnhaia\PhpCircuitBreaker\CircuitBreaker;
-use GabrielAnhaia\PhpCircuitBreaker\CircuitState;
-use GabrielAnhaia\PhpCircuitBreaker\Storage\InMemoryStorage;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\CircuitBreaker;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\CircuitState;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage\InMemoryStorage;
+use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerCloseCommand;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Command\Command;
@@ -15,31 +15,29 @@ use Symfony\Component\Console\Tester\CommandCompletionTester;
 use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\DependencyInjection\ServiceLocator;
 
-#[CoversClass(CircuitBreakerClearCommand::class)]
-final class CircuitBreakerClearCommandTest extends TestCase
+#[CoversClass(CircuitBreakerCloseCommand::class)]
+final class CircuitBreakerCloseCommandTest extends TestCase
 {
-    public function testClearsCircuitBreakerOverrideForDefaultServiceName(): void
+    public function testClosesCircuitBreakerForDefaultServiceName(): void
     {
-        $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage);
-        $circuitBreaker->forceState('api', CircuitState::OPEN);
+        $circuitBreaker = new CircuitBreaker(new InMemoryStorage());
+        $circuitBreaker->forceState('api', CircuitState::Open);
         $tester = self::createCommandTester($circuitBreaker);
 
         self::assertSame(Command::SUCCESS, $tester->execute(['client' => 'api']));
-        self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState('api'));
-        self::assertStringContainsString('Circuit breaker override for [api] on client [api] cleared.', $tester->getDisplay());
+        self::assertSame(CircuitState::Closed, $circuitBreaker->getState('api'));
+        self::assertStringContainsString('Circuit breaker for [api] on client [api] closed.', $tester->getDisplay());
     }
 
-    public function testClearsCircuitBreakerOverrideForResolvedServiceName(): void
+    public function testClosesCircuitBreakerForResolvedServiceName(): void
     {
-        $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage);
-        $circuitBreaker->forceState('api:example.com', CircuitState::OPEN);
+        $circuitBreaker = new CircuitBreaker(new InMemoryStorage());
+        $circuitBreaker->forceState('api:example.com', CircuitState::Open);
         $tester = self::createCommandTester($circuitBreaker);
 
         self::assertSame(Command::SUCCESS, $tester->execute(['client' => 'api', 'service' => 'example.com']));
-        self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState('api:example.com'));
-        self::assertStringContainsString('Circuit breaker override for [example.com] on client [api] cleared.', $tester->getDisplay());
+        self::assertSame(CircuitState::Closed, $circuitBreaker->getState('api:example.com'));
+        self::assertStringContainsString('Circuit breaker for [example.com] on client [api] closed.', $tester->getDisplay());
     }
 
     public function testFailsForUnknownClient(): void
@@ -54,7 +52,7 @@ final class CircuitBreakerClearCommandTest extends TestCase
     public function testCompletesConfiguredHttpClientArgument(): void
     {
         $circuitBreaker = new CircuitBreaker(new InMemoryStorage());
-        $tester = new CommandCompletionTester(new CircuitBreakerClearCommand(new ServiceLocator([
+        $tester = new CommandCompletionTester(new CircuitBreakerCloseCommand(new ServiceLocator([
             'api' => static fn (): CircuitBreaker => $circuitBreaker,
             'secondary' => static fn (): CircuitBreaker => $circuitBreaker,
         ])));
@@ -64,7 +62,7 @@ final class CircuitBreakerClearCommandTest extends TestCase
 
     private static function createCommandTester(CircuitBreaker $circuitBreaker): CommandTester
     {
-        return new CommandTester(new CircuitBreakerClearCommand(new ServiceLocator([
+        return new CommandTester(new CircuitBreakerCloseCommand(new ServiceLocator([
             'api' => static fn (): CircuitBreaker => $circuitBreaker,
         ])));
     }

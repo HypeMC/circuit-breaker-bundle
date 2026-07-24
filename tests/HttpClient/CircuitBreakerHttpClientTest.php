@@ -4,17 +4,16 @@ declare(strict_types=1);
 
 namespace Bizkit\CircuitBreakerBundle\Tests\HttpClient;
 
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\CircuitBreaker;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\CircuitState;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\Settings;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage\InMemoryStorage;
 use Bizkit\CircuitBreakerBundle\Exception\OpenCircuitException;
 use Bizkit\CircuitBreakerBundle\FailureChecker\DefaultFailureChecker;
 use Bizkit\CircuitBreakerBundle\FailureChecker\FailureCheckerInterface;
 use Bizkit\CircuitBreakerBundle\HttpClient\CircuitBreakerHttpClient;
 use Bizkit\CircuitBreakerBundle\ServiceNameResolver\HostServiceNameResolver;
 use Bizkit\CircuitBreakerBundle\ServiceNameResolver\ServiceNameResolverInterface;
-use GabrielAnhaia\PhpCircuitBreaker\CircuitBreaker;
-use GabrielAnhaia\PhpCircuitBreaker\CircuitBreakerConfig;
-use GabrielAnhaia\PhpCircuitBreaker\CircuitState;
-use GabrielAnhaia\PhpCircuitBreaker\Exception\OpenCircuitException as VendorOpenCircuitException;
-use GabrielAnhaia\PhpCircuitBreaker\Storage\InMemoryStorage;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\TestCase;
@@ -41,8 +40,8 @@ final class CircuitBreakerHttpClientTest extends TestCase
     public function testRecordsSuccessForSuccessfulResponseAfterBodyCompletes(array $options, string $serviceName): void
     {
         $storage = new InMemoryStorage();
-        $storage->setHalfOpen($serviceName, 30);
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
+        $circuitBreaker->forceState($serviceName, CircuitState::HalfOpen);
         $client = new CircuitBreakerHttpClient(
             new MockHttpClient(new MockResponse('ok', ['http_code' => 200])),
             $circuitBreaker,
@@ -53,16 +52,16 @@ final class CircuitBreakerHttpClientTest extends TestCase
         $response = $client->request('GET', 'https://example.com', $options);
 
         self::assertSame(200, $response->getStatusCode());
-        self::assertSame(CircuitState::HALF_OPEN, $circuitBreaker->getState($serviceName));
+        self::assertSame(CircuitState::HalfOpen, $circuitBreaker->getState($serviceName));
         self::assertSame('ok', $response->getContent(false));
-        self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState($serviceName));
+        self::assertSame(CircuitState::Closed, $circuitBreaker->getState($serviceName));
     }
 
     public function testRecordsSuccessForClientErrorResponseAfterBodyCompletes(): void
     {
         $storage = new InMemoryStorage();
-        $storage->setHalfOpen('api', 30);
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
+        $circuitBreaker->forceState('api', CircuitState::HalfOpen);
         $client = new CircuitBreakerHttpClient(
             new MockHttpClient(new MockResponse('not found', ['http_code' => 404])),
             $circuitBreaker,
@@ -73,9 +72,35 @@ final class CircuitBreakerHttpClientTest extends TestCase
         $response = $client->request('GET', 'https://example.com');
 
         self::assertSame(404, $response->getStatusCode());
-        self::assertSame(CircuitState::HALF_OPEN, $circuitBreaker->getState('api'));
+        self::assertSame(CircuitState::HalfOpen, $circuitBreaker->getState('api'));
         self::assertSame('not found', $response->getContent(false));
-        self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState('api'));
+        self::assertSame(CircuitState::Closed, $circuitBreaker->getState('api'));
+    }
+
+    public function testBlocksAdditionalHalfOpenAttemptsWhenAttemptLimitIsReached(): void
+    {
+        $circuitBreaker = new CircuitBreaker(new InMemoryStorage(), new Settings(
+            failureThreshold: 1,
+            halfOpenMaxAttempts: 1,
+        ));
+        $circuitBreaker->forceState('api', CircuitState::HalfOpen);
+        $client = new CircuitBreakerHttpClient(
+            new MockHttpClient(new MockResponse('ok', ['http_code' => 200])),
+            $circuitBreaker,
+            new DefaultFailureChecker(),
+            'api',
+        );
+
+        $response = $client->request('GET', 'https://example.com');
+
+        try {
+            $client->request('GET', 'https://example.com');
+            self::fail('Expected an open circuit exception.');
+        } catch (OpenCircuitException) {
+        }
+
+        self::assertSame('ok', $response->getContent(false));
+        self::assertSame(CircuitState::Closed, $circuitBreaker->getState('api'));
     }
 
     /**
@@ -86,7 +111,7 @@ final class CircuitBreakerHttpClientTest extends TestCase
     public function testRecordsFailureForServerErrorResponse(array $options, string $serviceName): void
     {
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
         $client = new CircuitBreakerHttpClient(
             new MockHttpClient(new MockResponse('', ['http_code' => 500])),
             $circuitBreaker,
@@ -95,13 +120,13 @@ final class CircuitBreakerHttpClientTest extends TestCase
         );
 
         self::assertSame(500, $client->request('GET', 'https://example.com', $options)->getStatusCode());
-        self::assertSame(CircuitState::OPEN, $circuitBreaker->getState($serviceName));
+        self::assertSame(CircuitState::Open, $circuitBreaker->getState($serviceName));
     }
 
     public function testInjectedFailureCheckerCanRecordClientErrorAsFailure(): void
     {
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
         $failureChecker = new class implements FailureCheckerInterface {
             public function __invoke(ChunkInterface $chunk, AsyncContext $context, string $serviceName): bool
             {
@@ -116,14 +141,14 @@ final class CircuitBreakerHttpClientTest extends TestCase
         );
 
         self::assertSame(404, $client->request('GET', 'https://example.com')->getStatusCode());
-        self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('api'));
+        self::assertSame(CircuitState::Open, $circuitBreaker->getState('api'));
     }
 
     public function testInjectedFailureCheckerCanIgnoreServerError(): void
     {
         $storage = new InMemoryStorage();
-        $storage->setHalfOpen('api', 30);
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
+        $circuitBreaker->forceState('api', CircuitState::HalfOpen);
         $failureChecker = new class implements FailureCheckerInterface {
             public function __invoke(ChunkInterface $chunk, AsyncContext $context, string $serviceName): bool
             {
@@ -140,15 +165,15 @@ final class CircuitBreakerHttpClientTest extends TestCase
         $response = $client->request('GET', 'https://example.com');
 
         self::assertSame(500, $response->getStatusCode());
-        self::assertSame(CircuitState::HALF_OPEN, $circuitBreaker->getState('api'));
+        self::assertSame(CircuitState::HalfOpen, $circuitBreaker->getState('api'));
         self::assertSame('server error', $response->getContent(false));
-        self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState('api'));
+        self::assertSame(CircuitState::Closed, $circuitBreaker->getState('api'));
     }
 
     public function testRequestFailureCheckerOverridesInjectedFailureChecker(): void
     {
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
         $failureChecker = new class implements FailureCheckerInterface {
             public function __invoke(ChunkInterface $chunk, AsyncContext $context, string $serviceName): bool
             {
@@ -171,13 +196,13 @@ final class CircuitBreakerHttpClientTest extends TestCase
         ]);
 
         self::assertSame(404, $response->getStatusCode());
-        self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('api'));
+        self::assertSame(CircuitState::Open, $circuitBreaker->getState('api'));
     }
 
     public function testRequestFailureCheckerOverrideReceivesOverriddenServiceName(): void
     {
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
         $failureChecker = new class implements FailureCheckerInterface {
             public function __invoke(ChunkInterface $chunk, AsyncContext $context, string $serviceName): bool
             {
@@ -203,14 +228,14 @@ final class CircuitBreakerHttpClientTest extends TestCase
         ]);
 
         self::assertSame(404, $response->getStatusCode());
-        self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState('api'));
-        self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('api:payments'));
+        self::assertSame(CircuitState::Closed, $circuitBreaker->getState('api'));
+        self::assertSame(CircuitState::Open, $circuitBreaker->getState('api:payments'));
     }
 
     public function testInjectedServiceNameResolverCanResolveServiceName(): void
     {
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
         $client = new CircuitBreakerHttpClient(
             new MockHttpClient(new MockResponse('', ['http_code' => 500])),
             $circuitBreaker,
@@ -220,14 +245,14 @@ final class CircuitBreakerHttpClientTest extends TestCase
         );
 
         self::assertSame(500, $client->request('GET', 'https://example.com/path')->getStatusCode());
-        self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState('api'));
-        self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('api:example.com'));
+        self::assertSame(CircuitState::Closed, $circuitBreaker->getState('api'));
+        self::assertSame(CircuitState::Open, $circuitBreaker->getState('api:example.com'));
     }
 
     public function testServiceNameResolverCanFallBackToDefaultServiceName(): void
     {
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
         $client = new CircuitBreakerHttpClient(
             new MockHttpClient(new MockResponse('', ['http_code' => 500])),
             $circuitBreaker,
@@ -237,13 +262,13 @@ final class CircuitBreakerHttpClientTest extends TestCase
         );
 
         self::assertSame(500, $client->request('GET', '/path')->getStatusCode());
-        self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('api'));
+        self::assertSame(CircuitState::Open, $circuitBreaker->getState('api'));
     }
 
     public function testRequestServiceNameCallableOverrideWinsOverInjectedResolver(): void
     {
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
         $client = new CircuitBreakerHttpClient(
             new MockHttpClient(new MockResponse('', ['http_code' => 500])),
             $circuitBreaker,
@@ -271,15 +296,15 @@ final class CircuitBreakerHttpClientTest extends TestCase
 
         self::assertSame(500, $response->getStatusCode());
         self::assertSame([['GET', 'https://example.com/path', $options]], $calls);
-        self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState('api'));
-        self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState('api:example.com'));
-        self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('api:payments'));
+        self::assertSame(CircuitState::Closed, $circuitBreaker->getState('api'));
+        self::assertSame(CircuitState::Closed, $circuitBreaker->getState('api:example.com'));
+        self::assertSame(CircuitState::Open, $circuitBreaker->getState('api:payments'));
     }
 
     public function testRequestServiceNameCallableCanFallBackToInjectedResolver(): void
     {
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
         $client = new CircuitBreakerHttpClient(
             new MockHttpClient(new MockResponse('', ['http_code' => 500])),
             $circuitBreaker,
@@ -297,14 +322,14 @@ final class CircuitBreakerHttpClientTest extends TestCase
         ]);
 
         self::assertSame(500, $response->getStatusCode());
-        self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState('api'));
-        self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('api:example.com'));
+        self::assertSame(CircuitState::Closed, $circuitBreaker->getState('api'));
+        self::assertSame(CircuitState::Open, $circuitBreaker->getState('api:example.com'));
     }
 
     public function testRecordsFailureForServerErrorResponseWhenStreaming(): void
     {
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
         $client = new CircuitBreakerHttpClient(
             new MockHttpClient(new MockResponse('error', ['http_code' => 500])),
             $circuitBreaker,
@@ -320,7 +345,7 @@ final class CircuitBreakerHttpClientTest extends TestCase
                 $chunk->getContent();
             }
         } finally {
-            self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('api'));
+            self::assertSame(CircuitState::Open, $circuitBreaker->getState('api'));
         }
     }
 
@@ -329,7 +354,7 @@ final class CircuitBreakerHttpClientTest extends TestCase
     public function testRecordsFailureForTransportException(MockResponse $response): void
     {
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
         $client = new CircuitBreakerHttpClient(
             new MockHttpClient($response),
             $circuitBreaker,
@@ -342,14 +367,14 @@ final class CircuitBreakerHttpClientTest extends TestCase
         try {
             $client->request('GET', 'https://example.com')->getContent(false);
         } finally {
-            self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('api'));
+            self::assertSame(CircuitState::Open, $circuitBreaker->getState('api'));
         }
     }
 
     public function testRecordsFailureOnlyOnceWhenServerErrorResponseAlsoFailsWhileStreamingBody(): void
     {
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 2));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 2));
         $client = new CircuitBreakerHttpClient(
             new MockHttpClient(new MockResponse([new TransportException('Network failure')], ['http_code' => 500])),
             $circuitBreaker,
@@ -362,7 +387,7 @@ final class CircuitBreakerHttpClientTest extends TestCase
         try {
             $client->request('GET', 'https://example.com')->getContent(false);
         } finally {
-            self::assertSame(CircuitState::CLOSED, $circuitBreaker->getState('api'));
+            self::assertSame(CircuitState::Closed, $circuitBreaker->getState('api'));
         }
     }
 
@@ -370,7 +395,7 @@ final class CircuitBreakerHttpClientTest extends TestCase
     {
         $records = [];
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
         $client = new CircuitBreakerHttpClient(
             new MockHttpClient(new MockResponse('ok', ['http_code' => 200])),
             $circuitBreaker,
@@ -399,7 +424,7 @@ final class CircuitBreakerHttpClientTest extends TestCase
     {
         $records = [];
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
         $client = new CircuitBreakerHttpClient(
             new MockHttpClient(new MockResponse('', ['http_code' => 500])),
             $circuitBreaker,
@@ -428,7 +453,7 @@ final class CircuitBreakerHttpClientTest extends TestCase
     {
         $records = [];
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
         $client = new CircuitBreakerHttpClient(
             new MockHttpClient(new MockResponse('', ['error' => 'host unreachable'])),
             $circuitBreaker,
@@ -462,34 +487,8 @@ final class CircuitBreakerHttpClientTest extends TestCase
     {
         $records = [];
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(exceptionsEnabled: false));
-        $circuitBreaker->forceState('api', CircuitState::OPEN);
-        $innerClient = new MockHttpClient();
-
-        $client = new CircuitBreakerHttpClient($innerClient, $circuitBreaker, new DefaultFailureChecker(), 'api');
-        $client->setLogger(self::createLogger($records));
-
-        self::assertSame(503, $client->request('GET', 'https://example.com')->getStatusCode());
-
-        self::assertSame([
-            [
-                'level' => 'debug',
-                'message' => 'Circuit breaker blocked HTTP request.',
-                'context' => [
-                    'service_name' => 'api',
-                    'method' => 'GET',
-                    'url' => 'https://example.com',
-                ],
-            ],
-        ], $records);
-    }
-
-    public function testLogsBlockedRequestWhenCircuitIsOpenAndExceptionsAreEnabled(): void
-    {
-        $records = [];
-        $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(exceptionsEnabled: true));
-        $circuitBreaker->forceState('api', CircuitState::OPEN);
+        $circuitBreaker = new CircuitBreaker($storage, new Settings());
+        $circuitBreaker->forceState('api', CircuitState::Open);
 
         $client = new CircuitBreakerHttpClient(new MockHttpClient(), $circuitBreaker, new DefaultFailureChecker(), 'api');
         $client->setLogger(self::createLogger($records));
@@ -518,28 +517,33 @@ final class CircuitBreakerHttpClientTest extends TestCase
      */
     #[TestWith([[], 'api'], 'default service name')]
     #[TestWith([['extra' => ['circuit_breaker' => ['service_name' => 'payments']]], 'api:payments'], 'overridden service name')]
-    public function testReturnsSyntheticServiceUnavailableResponseWithoutCallingDecoratedClientWhenCircuitIsOpen(array $options, string $serviceName): void
+    public function testThrowsWithoutCallingDecoratedClientWhenCircuitIsOpen(array $options, string $serviceName): void
     {
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(exceptionsEnabled: false));
-        $circuitBreaker->forceState($serviceName, CircuitState::OPEN);
+        $circuitBreaker = new CircuitBreaker($storage, new Settings());
+        $circuitBreaker->forceState($serviceName, CircuitState::Open);
         $innerClient = new MockHttpClient();
 
         $client = new CircuitBreakerHttpClient($innerClient, $circuitBreaker, new DefaultFailureChecker(), 'api');
-        $response = $client->request('GET', 'https://example.com', $options);
 
-        self::assertSame(503, $response->getStatusCode());
-        self::assertSame('{"message":"Service unavailable."}', $response->getContent(false));
-        self::assertTrue($response->getInfo('circuit_breaker_open'));
-        self::assertSame($serviceName, $response->getInfo('circuit_breaker_service'));
+        try {
+            $client->request('GET', 'https://example.com', $options);
+            self::fail('Expected an open circuit exception.');
+        } catch (OpenCircuitException $exception) {
+            self::assertSame($serviceName, $exception->serviceName);
+            self::assertSame('GET', $exception->method);
+            self::assertSame('https://example.com', $exception->url);
+            self::assertNull($exception->getPrevious());
+        }
+
         self::assertSame(0, $innerClient->getRequestsCount());
     }
 
-    public function testThrowsWhenCircuitIsOpenAndExceptionsAreEnabled(): void
+    public function testThrowsWhenCircuitIsOpen(): void
     {
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(exceptionsEnabled: true));
-        $circuitBreaker->forceState('api', CircuitState::OPEN);
+        $circuitBreaker = new CircuitBreaker($storage, new Settings());
+        $circuitBreaker->forceState('api', CircuitState::Open);
 
         $client = new CircuitBreakerHttpClient(new MockHttpClient(), $circuitBreaker, new DefaultFailureChecker(), 'api');
 
@@ -550,24 +554,24 @@ final class CircuitBreakerHttpClientTest extends TestCase
             self::assertSame('api', $exception->serviceName);
             self::assertSame('POST', $exception->method);
             self::assertSame('https://example.com', $exception->url);
-            self::assertInstanceOf(VendorOpenCircuitException::class, $exception->getPrevious());
+            self::assertNull($exception->getPrevious());
         }
     }
 
     public function testResetResetsDecoratedClientWithoutClearingCircuitStorage(): void
     {
         $storage = new InMemoryStorage();
-        $circuitBreaker = new CircuitBreaker($storage, new CircuitBreakerConfig(failureThreshold: 1));
+        $circuitBreaker = new CircuitBreaker($storage, new Settings(failureThreshold: 1));
         $innerClient = new MockHttpClient(new MockResponse());
 
         $client = new CircuitBreakerHttpClient($innerClient, $circuitBreaker, new DefaultFailureChecker(), 'api');
         $client->request('GET', 'https://example.com')->getStatusCode();
         self::assertSame(1, $innerClient->getRequestsCount());
 
-        $circuitBreaker->forceState('api', CircuitState::OPEN);
+        $circuitBreaker->forceState('api', CircuitState::Open);
         $client->reset();
 
-        self::assertSame(CircuitState::OPEN, $circuitBreaker->getState('api'));
+        self::assertSame(CircuitState::Open, $circuitBreaker->getState('api'));
         self::assertSame(0, $innerClient->getRequestsCount());
     }
 

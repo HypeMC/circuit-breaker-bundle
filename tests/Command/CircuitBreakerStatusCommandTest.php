@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace Bizkit\CircuitBreakerBundle\Tests\Command;
 
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\CircuitBreaker;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\CircuitState;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage\InMemoryStorage;
 use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerStatusCommand;
-use GabrielAnhaia\PhpCircuitBreaker\CircuitBreaker;
-use GabrielAnhaia\PhpCircuitBreaker\Storage\InMemoryStorage;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Command\Command;
@@ -20,8 +21,8 @@ final class CircuitBreakerStatusCommandTest extends TestCase
     public function testShowsCircuitBreakerStateForDefaultServiceName(): void
     {
         $storage = new InMemoryStorage();
-        $storage->setOpen('api', 30);
         $circuitBreaker = new CircuitBreaker($storage);
+        $circuitBreaker->forceState('api', CircuitState::Open);
         $tester = self::createCommandTester($circuitBreaker);
 
         self::assertSame(Command::SUCCESS, $tester->execute(['client' => 'api']));
@@ -31,8 +32,8 @@ final class CircuitBreakerStatusCommandTest extends TestCase
     public function testShowsCircuitBreakerStateForResolvedServiceName(): void
     {
         $storage = new InMemoryStorage();
-        $storage->setOpen('api:example.com', 30);
         $circuitBreaker = new CircuitBreaker($storage);
+        $circuitBreaker->forceState('api:example.com', CircuitState::Open);
         $tester = self::createCommandTester($circuitBreaker);
 
         self::assertSame(Command::SUCCESS, $tester->execute(['client' => 'api', 'service' => 'example.com']));

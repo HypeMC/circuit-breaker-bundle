@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Bizkit\CircuitBreakerBundle\Command;
 
-use GabrielAnhaia\PhpCircuitBreaker\CircuitBreaker;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\CircuitBreaker;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -13,10 +13,10 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\DependencyInjection\ServiceLocator;
 
 #[AsCommand(
-    name: 'bizkit:circuit-breaker:clear',
-    description: 'Clear a circuit breaker state override for an HTTP client',
+    name: 'bizkit:circuit-breaker:close',
+    description: 'Close the circuit breaker for an HTTP client',
 )]
-final class CircuitBreakerClearCommand extends Command
+final class CircuitBreakerCloseCommand extends Command
 {
     /**
      * @var list<string>
@@ -44,7 +44,8 @@ final class CircuitBreakerClearCommand extends Command
                 null,
                 $this->circuitBreakerServices,
             )
-            ->addArgument('service', InputArgument::OPTIONAL, 'The circuit breaker service name');
+            ->addArgument('service', InputArgument::OPTIONAL, 'The circuit breaker service name')
+        ;
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -66,9 +67,9 @@ final class CircuitBreakerClearCommand extends Command
             return self::FAILURE;
         }
 
-        $this->circuitBreakers->get($client)->clearOverride($serviceName);
+        $this->circuitBreakers->get($client)->forceClose($serviceName);
 
-        $output->writeln(\sprintf('<info>Circuit breaker override for [%s] on client [%s] cleared.</info>', $displayServiceName, $client));
+        $output->writeln(\sprintf('<info>Circuit breaker for [%s] on client [%s] closed.</info>', $displayServiceName, $client));
 
         return self::SUCCESS;
     }

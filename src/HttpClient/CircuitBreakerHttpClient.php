@@ -4,19 +4,16 @@ declare(strict_types=1);
 
 namespace Bizkit\CircuitBreakerBundle\HttpClient;
 
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\CircuitBreaker;
 use Bizkit\CircuitBreakerBundle\Exception\OpenCircuitException;
 use Bizkit\CircuitBreakerBundle\FailureChecker\FailureCheckerInterface;
 use Bizkit\CircuitBreakerBundle\ServiceNameResolver\ServiceNameResolverInterface;
-use GabrielAnhaia\PhpCircuitBreaker\CircuitBreaker;
-use GabrielAnhaia\PhpCircuitBreaker\Exception\OpenCircuitException as VendorOpenCircuitException;
 use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerAwareTrait;
 use Symfony\Component\HttpClient\AsyncDecoratorTrait;
 use Symfony\Component\HttpClient\Exception\InvalidArgumentException;
-use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\AsyncContext;
 use Symfony\Component\HttpClient\Response\AsyncResponse;
-use Symfony\Component\HttpClient\Response\JsonMockResponse;
 use Symfony\Contracts\HttpClient\ChunkInterface;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -65,25 +62,13 @@ final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterf
 
         $serviceName = $this->resolveServiceName($method, $url, $options, $circuitBreakerOptions);
 
-        $canPass = false;
-        $exception = null;
-        try {
-            $canPass = $this->circuitBreaker->canPass($serviceName);
-        } catch (VendorOpenCircuitException $previous) {
-            $exception = new OpenCircuitException($serviceName, $method, $url, $previous);
-        }
-
-        if (!$canPass) {
+        if (!$this->circuitBreaker->tryAcquireAttempt($serviceName)) {
             $this->logger?->debug(
                 'Circuit breaker blocked HTTP request.',
                 self::createLogContext($method, $url, $serviceName),
             );
 
-            if (null !== $exception) {
-                throw $exception;
-            }
-
-            return self::createOpenCircuitResponse($method, $url, $options, $serviceName);
+            throw new OpenCircuitException($serviceName, $method, $url);
         }
 
         $recorded = false;
@@ -149,23 +134,6 @@ final class CircuitBreakerHttpClient implements HttpClientInterface, ResetInterf
         }
 
         return $this->defaultServiceName.':'.$serviceName;
-    }
-
-    /**
-     * @param array<string, mixed> $options
-     */
-    private static function createOpenCircuitResponse(string $method, string $url, array $options, string $serviceName): ResponseInterface
-    {
-        $response = new JsonMockResponse(
-            ['message' => 'Service unavailable.'],
-            [
-                'http_code' => 503,
-                'circuit_breaker_open' => true,
-                'circuit_breaker_service' => $serviceName,
-            ],
-        );
-
-        return new AsyncResponse(new MockHttpClient($response), $method, $url, $options);
     }
 
     /**

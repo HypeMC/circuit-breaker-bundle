@@ -5,15 +5,15 @@ declare(strict_types=1);
 namespace Bizkit\CircuitBreakerBundle\Tests;
 
 use Bizkit\CircuitBreakerBundle\BizkitCircuitBreakerBundle;
-use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerClearCommand;
-use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerForceCommand;
+use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerCloseCommand;
+use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerOpenCommand;
 use Bizkit\CircuitBreakerBundle\Command\CircuitBreakerStatusCommand;
+use Bizkit\CircuitBreakerBundle\Exception\OpenCircuitException;
 use Bizkit\CircuitBreakerBundle\FailureChecker\DefaultFailureChecker;
 use Bizkit\CircuitBreakerBundle\HttpClient\CircuitBreakerHttpClient;
 use Bizkit\CircuitBreakerBundle\ServiceNameResolver\HostServiceNameResolver;
 use Bizkit\CircuitBreakerBundle\Tests\Fixtures\ClientErrorFailureChecker;
 use Bizkit\CircuitBreakerBundle\Tests\Fixtures\TestCacheItemPool;
-use GabrielAnhaia\PhpCircuitBreaker\Event\Psr14EventDispatcherBridge;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Symfony\Bridge\PhpUnit\ClassExistsMock;
@@ -21,7 +21,6 @@ use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ServiceLocator;
-use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
@@ -45,10 +44,10 @@ final class BizkitCircuitBreakerBundleTest extends TestCase
                 'storage' => 'cache.app',
                 'failure_threshold' => 6,
                 'success_threshold' => 2,
-                'time_window' => 40,
+                'failure_time_window' => 40,
                 'open_timeout' => 50,
                 'half_open_timeout' => 15,
-                'exceptions_enabled' => true,
+                'half_open_max_attempts' => 2,
                 'failure_checker' => 'custom.failure_checker',
                 'service_name_resolver' => 'bizkit_circuit_breaker.service_name_resolver.host',
             ],
@@ -58,10 +57,10 @@ final class BizkitCircuitBreakerBundleTest extends TestCase
             'storage' => 'cache.app',
             'failure_threshold' => 6,
             'success_threshold' => 2,
-            'time_window' => 40,
+            'failure_time_window' => 40,
             'open_timeout' => 50,
             'half_open_timeout' => 15,
-            'exceptions_enabled' => true,
+            'half_open_max_attempts' => 2,
             'failure_checker' => 'custom.failure_checker',
             'service_name_resolver' => 'bizkit_circuit_breaker.service_name_resolver.host',
         ], $container->getParameter('.bizkit_circuit_breaker.http_client'));
@@ -79,7 +78,6 @@ final class BizkitCircuitBreakerBundleTest extends TestCase
                 'client2' => [
                     'storage' => 'cache.client2',
                     'success_threshold' => 3,
-                    'exceptions_enabled' => true,
                 ],
             ],
         ]);
@@ -90,21 +88,21 @@ final class BizkitCircuitBreakerBundleTest extends TestCase
                 'storage' => 'cache.client1',
                 'failure_threshold' => 2,
                 'success_threshold' => 1,
-                'time_window' => 20,
+                'failure_time_window' => 20,
                 'open_timeout' => 30,
                 'half_open_timeout' => 20,
-                'exceptions_enabled' => false,
+                'half_open_max_attempts' => 1,
                 'failure_checker' => 'bizkit_circuit_breaker.failure_checker.default',
                 'service_name_resolver' => null,
             ],
             'client2' => [
                 'storage' => 'cache.client2',
                 'success_threshold' => 3,
-                'exceptions_enabled' => true,
                 'failure_threshold' => 5,
-                'time_window' => 20,
+                'failure_time_window' => 20,
                 'open_timeout' => 30,
                 'half_open_timeout' => 20,
+                'half_open_max_attempts' => 1,
                 'failure_checker' => 'bizkit_circuit_breaker.failure_checker.default',
                 'service_name_resolver' => null,
             ],
@@ -142,29 +140,19 @@ final class BizkitCircuitBreakerBundleTest extends TestCase
         self::assertSame([], $container->getParameter('.bizkit_circuit_breaker.http_client'));
         self::assertSame([], $container->getParameter('.bizkit_circuit_breaker.scoped_http_clients'));
 
-        self::assertTrue($container->hasDefinition('bizkit_circuit_breaker.command.clear'));
-        self::assertTrue($container->hasDefinition('bizkit_circuit_breaker.command.force'));
+        self::assertTrue($container->hasDefinition('bizkit_circuit_breaker.command.close'));
+        self::assertTrue($container->hasDefinition('bizkit_circuit_breaker.command.open'));
         self::assertTrue($container->hasDefinition('bizkit_circuit_breaker.command.status'));
-        self::assertTrue($container->hasDefinition('bizkit_circuit_breaker.event_dispatcher'));
         self::assertTrue($container->hasDefinition('bizkit_circuit_breaker.failure_checker.default'));
         self::assertTrue($container->hasDefinition('bizkit_circuit_breaker.service_name_resolver.host'));
         self::assertTrue($container->hasDefinition('bizkit_circuit_breaker.locator'));
 
-        self::assertSame(CircuitBreakerClearCommand::class, $container->getDefinition('bizkit_circuit_breaker.command.clear')->getClass());
-        self::assertSame(CircuitBreakerForceCommand::class, $container->getDefinition('bizkit_circuit_breaker.command.force')->getClass());
+        self::assertSame(CircuitBreakerCloseCommand::class, $container->getDefinition('bizkit_circuit_breaker.command.close')->getClass());
+        self::assertSame(CircuitBreakerOpenCommand::class, $container->getDefinition('bizkit_circuit_breaker.command.open')->getClass());
         self::assertSame(CircuitBreakerStatusCommand::class, $container->getDefinition('bizkit_circuit_breaker.command.status')->getClass());
-        self::assertSame(Psr14EventDispatcherBridge::class, $container->getDefinition('bizkit_circuit_breaker.event_dispatcher')->getClass());
         self::assertSame(DefaultFailureChecker::class, $container->getDefinition('bizkit_circuit_breaker.failure_checker.default')->getClass());
         self::assertSame(HostServiceNameResolver::class, $container->getDefinition('bizkit_circuit_breaker.service_name_resolver.host')->getClass());
         self::assertSame(ServiceLocator::class, $container->getDefinition('bizkit_circuit_breaker.locator')->getClass());
-    }
-
-    public function testRemovesEventDispatcherBridgeWhenEventDispatcherIsUnavailable(): void
-    {
-        $container = self::buildContainer([], false);
-
-        self::assertFalse($container->hasDefinition('bizkit_circuit_breaker.event_dispatcher'));
-        self::assertTrue($container->hasDefinition('bizkit_circuit_breaker.locator'));
     }
 
     public function testRemovesCommandsWhenConsoleIsUnavailable(): void
@@ -175,10 +163,9 @@ final class BizkitCircuitBreakerBundleTest extends TestCase
 
         $container = self::buildContainer();
 
-        self::assertFalse($container->hasDefinition('bizkit_circuit_breaker.command.clear'));
-        self::assertFalse($container->hasDefinition('bizkit_circuit_breaker.command.force'));
+        self::assertFalse($container->hasDefinition('bizkit_circuit_breaker.command.close'));
+        self::assertFalse($container->hasDefinition('bizkit_circuit_breaker.command.open'));
         self::assertFalse($container->hasDefinition('bizkit_circuit_breaker.command.status'));
-        self::assertTrue($container->hasDefinition('bizkit_circuit_breaker.event_dispatcher'));
         self::assertTrue($container->hasDefinition('bizkit_circuit_breaker.locator'));
     }
 
@@ -241,23 +228,30 @@ final class BizkitCircuitBreakerBundleTest extends TestCase
         $httpClient = $container->get('http_client');
         self::assertInstanceOf(CircuitBreakerHttpClient::class, $httpClient);
         self::assertSame(404, $httpClient->request('GET', 'https://example.com')->getStatusCode());
-        self::assertSame(503, $httpClient->request('GET', 'https://example.com')->getStatusCode());
+
+        try {
+            $httpClient->request('GET', 'https://example.com');
+            self::fail('Expected an open circuit exception.');
+        } catch (OpenCircuitException) {
+        }
+
         self::assertSame(404, $httpClient->request('GET', 'https://another.example.com')->getStatusCode());
-        self::assertSame(503, $httpClient->request('GET', 'https://another.example.com')->getStatusCode());
+
+        try {
+            $httpClient->request('GET', 'https://another.example.com');
+            self::fail('Expected an open circuit exception.');
+        } catch (OpenCircuitException) {
+        }
     }
 
     /**
      * @param array<string, mixed> $config
      */
-    private static function buildContainer(array $config = [], bool $registerEventDispatcher = true): ContainerBuilder
+    private static function buildContainer(array $config = []): ContainerBuilder
     {
         $container = new ContainerBuilder();
         $container->setParameter('kernel.environment', 'test');
         $container->setParameter('kernel.build_dir', '');
-
-        if ($registerEventDispatcher) {
-            $container->register('event_dispatcher', EventDispatcher::class);
-        }
 
         $extension = (new BizkitCircuitBreakerBundle())->getContainerExtension();
         $extension->load([$config], $container);

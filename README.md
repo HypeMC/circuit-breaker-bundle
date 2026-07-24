@@ -1,13 +1,12 @@
 # Bizkit Symfony CircuitBreakerBundle
 
 [![Latest Stable Version](https://poser.pugx.org/bizkit/symfony-circuit-breaker-bundle/v/stable)](https://packagist.org/packages/bizkit/symfony-circuit-breaker-bundle)
-[![Build Status](https://github.com/HypeMC/symfony-circuit-breaker-bundle/workflows/Tests/badge.svg)](https://github.com/HypeMC/symfony-circuit-breaker-bundle/actions)
+[![Build Status](https://github.com/HypeMC/symfony-circuit-breaker-bundle/actions/workflows/tests.yaml/badge.svg?branch=1.x)](https://github.com/HypeMC/symfony-circuit-breaker-bundle/actions/workflows/tests.yaml)
 [![Code Coverage](https://codecov.io/gh/HypeMC/symfony-circuit-breaker-bundle/branch/1.x/graph/badge.svg)](https://codecov.io/gh/HypeMC/symfony-circuit-breaker-bundle)
 [![License](https://poser.pugx.org/bizkit/symfony-circuit-breaker-bundle/license)](https://packagist.org/packages/bizkit/symfony-circuit-breaker-bundle)
 
-Bizkit Symfony CircuitBreakerBundle integrates
-[`gabrielanhaia/php-circuit-breaker`](https://github.com/gabrielanhaia/php-circuit-breaker) with Symfony HttpClient. It
-decorates configured HTTP clients and records request successes or failures in a PSR-6 cache-backed circuit breaker.
+Bizkit Symfony CircuitBreakerBundle adds circuit breaker behavior to Symfony HttpClient. It decorates configured HTTP
+clients and records request successes or failures in a PSR-6 cache-backed circuit breaker.
 
 ## What Is a Circuit Breaker?
 
@@ -40,30 +39,26 @@ stateDiagram-v2
 - **Symfony HttpClient integration**: Decorates the main `http_client` service and configured scoped HTTP client
   services.
 
-- **Per-client circuit breaker configuration**: Configure thresholds, time windows, open/half-open timeouts, and
-  exception behavior for the main client and each scoped client.
+- **Per-client circuit breaker configuration**: Configure thresholds, failure time windows, and open/half-open
+  timeouts for the main client and each scoped client.
 
 - **PSR-6 cache storage**: Uses a configured cache pool service as the storage backend for circuit breaker state.
 
 - **Custom failure rules**: Decide which responses or transport errors should count as circuit breaker failures.
 
 - **Service name resolution**: Use the configured client service name, resolve the name from the request host, or
-  override it for a single request.
-
-- **Symfony Event Dispatcher integration**: Dispatches php-circuit-breaker events through Symfony's event dispatcher
-  when `symfony/event-dispatcher` is installed.
+  customize it for a single request.
 
 - **Debug logging**: Logs blocked requests and recorded outcomes to the `bizkit_circuit_breaker` logger channel when a
   `logger` service is available.
 
-- **Console commands**: Optional commands are available when `symfony/console` is installed to inspect, force, and clear
+- **Console commands**: Optional commands are available when `symfony/console` is installed to inspect, open, and close
   circuit breaker state.
 
 ## Requirements
 
 - [PHP 8.1](https://www.php.net/releases/8_1_0.php) or higher
 - [Symfony 6.4](https://symfony.com/roadmap/6.4), [Symfony 7.4](https://symfony.com/roadmap/7.4), or higher
-- [`gabrielanhaia/php-circuit-breaker`](https://github.com/gabrielanhaia/php-circuit-breaker) 3.0 or higher
 
 ## Installation
 
@@ -92,10 +87,10 @@ bizkit_circuit_breaker:
         storage:               cache.circuit_breaker
         failure_threshold:     5
         success_threshold:     1
-        time_window:           20
+        failure_time_window:   20
         open_timeout:          30
         half_open_timeout:     20
-        exceptions_enabled:    false
+        half_open_max_attempts: 1
 
         # Service ID of the failure checker used to decide when a response
         # should count as a circuit breaker failure.
@@ -112,10 +107,10 @@ bizkit_circuit_breaker:
             storage:               cache.circuit_breaker
             failure_threshold:     3
             success_threshold:     1
-            time_window:           20
+            failure_time_window:   20
             open_timeout:          60
             half_open_timeout:     20
-            exceptions_enabled:    false
+            half_open_max_attempts: 1
 
             # Service ID of the failure checker used to decide when a response
             # should count as a circuit breaker failure.
@@ -127,8 +122,9 @@ bizkit_circuit_breaker:
 ```
 
 The `storage` value must be the service ID of a PSR-6 cache pool. A client without a configured `storage` value is not
-decorated. Omit `failure_checker` to use the default transport-error and `5xx` failure behavior. Omit
-`service_name_resolver` to use the HTTP client service ID as the circuit breaker service name.
+decorated. The bundle stores circuit state in that pool while preserving open, half-open, and closed transitions. Omit
+`failure_checker` to use the default transport-error and `5xx` failure behavior. Omit `service_name_resolver` to use the
+HTTP client service ID as the circuit breaker service name.
 
 You can use an existing pool, or define a dedicated Symfony cache pool:
 
@@ -169,11 +165,18 @@ final class ApiClient
 ```
 
 By default, successful responses record successes when the response body completes. Server errors (`5xx`) and transport
-errors record failures. If your API uses different status codes or response metadata to indicate failure, see
-[Custom Failure Rules](#custom-failure-rules).
+errors record failures. `failure_threshold` counts failures inside `failure_time_window`. Successful responses while the
+circuit is closed do not reset that counter. Old failures expire naturally when the window elapses. If your API uses
+different status codes or response metadata to indicate failure, see [Custom Failure Rules](#custom-failure-rules).
 
-When the circuit is open, `exceptions_enabled: false` returns a synthetic `503` response, while
-`exceptions_enabled: true` throws an `OpenCircuitException`:
+When the circuit is half-open, the decorated client allows up to `half_open_max_attempts` attempts at the same
+time and uses `success_threshold` to decide when the circuit can close again. The PSR-6 storage backend uses regular
+read/write/delete operations, so distributed workers may still race on failure counters or half-open attempt reservations.
+If a worker stops after an attempt is admitted but before the result is recorded, that attempt remains reserved until
+`half_open_timeout`. While the attempt limit is exhausted, the half-open circuit blocks additional attempts. Use shared
+cache storage for shared state, but do not treat it as an atomic coordination primitive.
+
+When the circuit is open, the decorated client throws an `OpenCircuitException` before the remote service is called:
 
 ```php
 use Bizkit\CircuitBreakerBundle\Exception\OpenCircuitException;
@@ -211,7 +214,7 @@ values are provided explicitly.
 The circuit breaker stores state by service name. Without extra configuration, the service name is the decorated HTTP
 client service ID, such as `http_client` or a scoped client ID like `api.client`.
 
-Custom service names are scoped under the configured HTTP client service ID. For example, a `payments-api` override on
+Custom service names are scoped under the configured HTTP client service ID. For example, a `payments-api` service name on
 `http_client` is stored as `http_client:payments-api`. This keeps two HTTP clients that share the same cache pool from
 accidentally sharing circuit breaker state.
 
@@ -225,7 +228,7 @@ bizkit_circuit_breaker:
         service_name_resolver: bizkit_circuit_breaker.service_name_resolver.host
 ```
 
-Override the circuit breaker service name for a single request with Symfony's `extra` option:
+Set the circuit breaker service name for a single request with Symfony's `extra` option:
 
 ```php
 $response = $client->request('GET', 'https://api.example.com/', [
@@ -237,7 +240,7 @@ $response = $client->request('GET', 'https://api.example.com/', [
 ]);
 ```
 
-The request override may also be a callable when the service name depends on the request. This is useful when one host
+The request service name may also be a callable when the service name depends on the request. This is useful when one host
 serves different upstream dependencies and they should not share circuit breaker state. Return `null` to keep using the
 configured resolver or default service name:
 
@@ -377,12 +380,12 @@ monolog:
 
 ### Console Commands
 
-When `symfony/console` is installed, the bundle registers commands to inspect state, force a state, and clear overrides.
+When `symfony/console` is installed, the bundle registers commands to inspect state, open a circuit, and close a circuit.
 
 ```sh
 php bin/console bizkit:circuit-breaker:status http_client
-php bin/console bizkit:circuit-breaker:force http_client open --ttl=60
-php bin/console bizkit:circuit-breaker:clear http_client
+php bin/console bizkit:circuit-breaker:open http_client --ttl=60
+php bin/console bizkit:circuit-breaker:close http_client
 ```
 
 The first argument is the configured HTTP client service ID. For the main client, use `http_client`. For scoped clients,
@@ -394,8 +397,8 @@ same circuit breaker state that the host resolver stores as `http_client:api.exa
 
 ```sh
 php bin/console bizkit:circuit-breaker:status http_client api.example.com
-php bin/console bizkit:circuit-breaker:force http_client open api.example.com --ttl=60
-php bin/console bizkit:circuit-breaker:clear http_client api.example.com
+php bin/console bizkit:circuit-breaker:open http_client api.example.com --ttl=60
+php bin/console bizkit:circuit-breaker:close http_client api.example.com
 ```
 
 ## Versioning

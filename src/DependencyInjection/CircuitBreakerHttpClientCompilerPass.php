@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Bizkit\CircuitBreakerBundle\DependencyInjection;
 
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\CircuitBreaker;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\Settings;
+use Bizkit\CircuitBreakerBundle\CircuitBreaker\Storage\Psr6CacheStorage;
 use Bizkit\CircuitBreakerBundle\HttpClient\CircuitBreakerHttpClient;
-use GabrielAnhaia\PhpCircuitBreaker\CircuitBreaker;
-use GabrielAnhaia\PhpCircuitBreaker\CircuitBreakerConfig;
-use GabrielAnhaia\PhpCircuitBreaker\Storage\Psr6CacheStorage;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -31,10 +31,10 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
          *     storage: ?string,
          *     failure_threshold: int,
          *     success_threshold: int,
-         *     time_window: int,
+         *     failure_time_window: int,
          *     open_timeout: int,
          *     half_open_timeout: int,
-         *     exceptions_enabled: bool,
+         *     half_open_max_attempts: int,
          *     failure_checker: ?string,
          *     service_name_resolver: ?string,
          * }|array{} $httpClientConfig
@@ -55,10 +55,10 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
          *     storage: ?string,
          *     failure_threshold: int,
          *     success_threshold: int,
-         *     time_window: int,
+         *     failure_time_window: int,
          *     open_timeout: int,
          *     half_open_timeout: int,
-         *     exceptions_enabled: bool,
+         *     half_open_max_attempts: int,
          *     failure_checker: ?string,
          *     service_name_resolver: ?string,
          * }> $scopedClients
@@ -85,10 +85,10 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
      *     storage: string,
      *     failure_threshold: int,
      *     success_threshold: int,
-     *     time_window: int,
+     *     failure_time_window: int,
      *     open_timeout: int,
      *     half_open_timeout: int,
-     *     exceptions_enabled: bool,
+     *     half_open_max_attempts: int,
      *     failure_checker: ?string,
      *     service_name_resolver: ?string,
      * } $config
@@ -125,21 +125,20 @@ final class CircuitBreakerHttpClientCompilerPass implements CompilerPassInterfac
 
         $idPrefix = 'bizkit_circuit_breaker.http_client'.('http_client' === $clientId ? '' : '.'.$clientId);
 
-        $container->register($configId = $idPrefix.'.config', CircuitBreakerConfig::class)
+        $container->register($configId = $idPrefix.'.config', Settings::class)
             ->setArguments([
                 $config['failure_threshold'],
                 $config['success_threshold'],
-                $config['time_window'],
+                $config['failure_time_window'],
                 $config['open_timeout'],
                 $config['half_open_timeout'],
-                $config['exceptions_enabled'],
+                $config['half_open_max_attempts'],
             ]);
 
         $container->register($circuitBreakerId = $idPrefix.'.circuit_breaker', CircuitBreaker::class)
             ->setArguments([
                 new Reference($storageId),
                 new Reference($configId),
-                new Reference('bizkit_circuit_breaker.event_dispatcher', ContainerInterface::IGNORE_ON_INVALID_REFERENCE),
             ]);
 
         $decoratorArguments = [
